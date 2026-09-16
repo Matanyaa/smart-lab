@@ -3,10 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Smart Lab</title>
+<title>Smart Lab (Test)</title>
 <link rel="icon" type="image/svg+xml" href="icon.svg">
-<link rel="apple-touch-icon" href="icon.svg">
-<link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#141a1f">
 <style>
   :root{
@@ -198,10 +196,6 @@ onAuthStateChanged(auth, (user) => {
     loginScreen.classList.remove('hidden');
   }
 });
-
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('sw.js');
-}
 
 async function checkForUpdate(){
   try{

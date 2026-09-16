@@ -40,6 +40,15 @@ above) covers both, since they're just different documents in the same
 database. Revisit real database-level isolation if the project ever moves to
 Blaze — see `SPEC.md`'s Decisions Log for the tradeoff.
 
+**Not independently installable to a phone home screen** — `docs/test/` has
+no manifest/service-worker of its own (removed after testing showed Android
+can't offer two separate installed icons when one path is nested under the
+other; the web platform's install-scope matching is a strict prefix match
+with no way to exclude a subpath). Access `/test/` via a browser bookmark/tab
+instead. See `SPEC.md`'s Decisions Log for the full story and the rejected
+alternative (a separate repo/sibling path, which would genuinely fix it but
+costs a second repo to keep in sync).
+
 ## Hosting
 
 Push to GitHub and enable **Settings → Pages** (source: branch `main`, `/docs`
