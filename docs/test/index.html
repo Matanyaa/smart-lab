@@ -130,7 +130,10 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
-const db = getFirestore(app, "test");
+// Spark (free) plan only allows the (default) database — no second named
+// database available. Data separation is a collection-name prefix instead
+// (test_ping vs ping) until/unless the project moves to Blaze.
+const db = getFirestore(app);
 
 const loginScreen = document.getElementById('loginScreen');
 const appScreen = document.getElementById('appScreen');
@@ -166,7 +169,7 @@ pingBtn.addEventListener('click', async () => {
   pingBtn.disabled = true;
   pingResult.textContent = 'Writing...';
   try {
-    const ref = doc(db, 'ping', 'latest');
+    const ref = doc(db, 'test_ping', 'latest');
     await setDoc(ref, {
       timestamp: serverTimestamp(),
       by: auth.currentUser.email

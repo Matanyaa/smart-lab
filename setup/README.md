@@ -26,26 +26,19 @@ governance docs.
    `firestore.rules` (this folder) → Publish. (Scopes all reads/writes to
    signed-in users only; role-based rules come in a later iteration.)
 
-## Test environment setup (`docs/test/`, required before it works)
+## Test environment (`docs/test/`)
 
-`docs/test/` is a second, isolated build — same Auth users, separate Firestore
-data — so testing never touches real data. It needs a second named database:
+`docs/test/` is a copy of the launched build — same Auth users, same
+`(default)` Firestore database — so no extra Firebase setup is needed for it.
 
-1. **Create the `test` database** — Firebase Console → Build → Firestore
-   Database → the database-name dropdown near the top (next to `(default)`) →
-   **Add database** (or "+ Create database") → name it exactly `test` →
-   **Native mode** → same region as `(default)` is fine. (If your Console
-   doesn't show that option, it can also be done via the `gcloud` CLI:
-   `gcloud firestore databases create --database=test --location=<region> --type=firestore-native`
-   — needs the Google Cloud SDK installed and authenticated against the
-   `smart-lab-abd80` project.)
-2. **Publish rules to it too** — Firestore Database → Rules → use the same
-   database-name dropdown to switch to `test` → paste in `firestore.rules`
-   (same contents as `(default)`'s) → Publish. Rules are per-database, so this
-   is a separate step from setting up `(default)`'s rules above.
-3. **Verify the split holds** — log into `docs/test/`'s URL, run "Test
-   Firestore round-trip" there, then check the Console: the `ping/latest` doc
-   should show up under the `test` database's data browser, not `(default)`'s.
+Firestore's second-named-database feature needs the paid Blaze plan; on the
+free Spark plan (what this project is on), only `(default)` is available. So
+data separation between `docs/` and `docs/test/` is a collection-name prefix
+instead: the launched build's round-trip test writes to a `ping` doc, the
+test build's writes to `test_ping`. Same `firestore.rules` (already published
+above) covers both, since they're just different documents in the same
+database. Revisit real database-level isolation if the project ever moves to
+Blaze — see `SPEC.md`'s Decisions Log for the tradeoff.
 
 ## Hosting
 
