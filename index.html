@@ -56,9 +56,18 @@
     padding:10px 12px; font-size:13px; color:var(--text-dim); white-space:pre-wrap; word-break:break-word;
     text-align:left; min-height:20px;
   }
+
+  #updateBanner{display:none; align-items:center; gap:10px; padding:8px 14px; background:var(--warn); color:#25200a; font-size:13px;}
+  #updateBanner button{border:1px solid #25200a55; background:transparent; color:#25200a; border-radius:6px; padding:4px 10px; font:inherit; cursor:pointer;}
 </style>
 </head>
 <body>
+
+<div id="updateBanner">
+  <span>A new version is available.</span>
+  <button id="reloadBtn">Reload</button>
+  <button id="dismissBtn" style="margin-left:auto;">Dismiss</button>
+</div>
 
 <header>
   <h1>smart-lab</h1>
@@ -104,7 +113,7 @@ import {
   getFirestore, doc, setDoc, getDoc, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 
-const APP_VERSION = '0.1.0-t02';
+const APP_VERSION = '0.1.0-t03';
 document.getElementById('versionBadge').textContent = `v${APP_VERSION}`;
 
 // --- Firebase config ---
@@ -190,6 +199,26 @@ onAuthStateChanged(auth, (user) => {
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js');
 }
+
+async function checkForUpdate(){
+  try{
+    const res = await fetch('./index.html', {cache:'no-store'});
+    const html = await res.text();
+    const match = html.match(/const APP_VERSION\s*=\s*'([^']+)'/);
+    if(!match) return;
+    const remoteVersion = match[1];
+    if(remoteVersion === APP_VERSION) return;
+    document.getElementById('updateBanner').style.display = 'flex';
+  }catch(e){ /* offline or not yet deployed — ignore */ }
+}
+document.getElementById('reloadBtn').addEventListener('click', ()=> location.reload());
+document.getElementById('dismissBtn').addEventListener('click', ()=>{
+  document.getElementById('updateBanner').style.display = 'none';
+});
+checkForUpdate();
+document.addEventListener('visibilitychange', ()=>{
+  if(document.visibilityState === 'visible') checkForUpdate();
+});
 </script>
 </body>
 </html>
