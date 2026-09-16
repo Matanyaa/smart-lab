@@ -113,7 +113,7 @@ import {
   getFirestore, doc, setDoc, getDoc, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 
-const APP_VERSION = '0.1.0-t04';
+const APP_VERSION = '0.1.0-t05';
 document.getElementById('versionBadge').textContent = `v${APP_VERSION}`;
 
 // --- Firebase config ---
@@ -219,9 +219,6 @@ checkForUpdate();
 document.addEventListener('visibilitychange', ()=>{
   if(document.visibilityState === 'visible') checkForUpdate();
 });
-setInterval(()=>{
-  if(document.visibilityState === 'visible') checkForUpdate();
-}, 60000);
 </script>
 </body>
 </html>
