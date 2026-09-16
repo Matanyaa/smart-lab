@@ -1,4 +1,5 @@
 {
+  "id": "/smart-lab/test/",
   "name": "Smart Lab (Test)",
   "short_name": "Lab Test",
   "start_url": "./",
