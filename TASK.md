@@ -58,3 +58,14 @@ Note the repo was restructured (app code moved to `docs/`, setup docs to `setup/
 **Verification still needed from you:** log into `/test/`, run "Test Firestore round-trip," then check the Firebase Console's `(default)` database data browser — you should see both a `ping` doc (from earlier root testing) and a separate `test_ping` doc (from this test), confirming they don't collide.
 
 **Update 2026-09-17 — `/test/` dropped as a separately-installable PWA.** Testing showed Android can't offer two independent home-screen icons when one URL path is nested under the other (`/test/` under `/`) — this is a strict web-platform limitation (manifest `scope` is a prefix match with no way to exclude a subpath), not something fixable with more manifest tweaks; confirmed after trying an explicit `id` field and a full uninstall/reinstall, still collided. Removed `docs/test/manifest.json` and `docs/test/sw.js` — `/test/` is browser bookmark/tab access only now, not home-screen-installable. This walks back one part of this TASK.md's icon/manifest spec (step 1's `icon-test.svg`/manifest naming work), since there's no longer a manifest for it to apply to. Full writeup in `SPEC.md`'s Decisions Log. If a genuinely separate installable test icon ever matters enough, the real fix is a second repo at a sibling (non-nested) path — costs a second repo to keep in sync, not attempted here.
+
+**Task complete — 2026-09-17. Current app versions: root `0.1.0`, `/test/` `0.2.0-t01`.**
+
+Both of this iteration's two steps are done and user-verified: root launched at plain `0.1.0` (dropped `-t05`), and `/test/` stood up and confirmed data-isolated from root — the Firebase Console shows `ping` and `test_ping` as two separate top-level collections in the shared `(default)` database, proving writes from each build don't collide despite sharing everything else (Auth, database, rules).
+
+Net deviations from this TASK.md's original design, all discovered mid-build and resolved with the user rather than guessed silently:
+- **Data isolation mechanism changed**: planned second named Firestore database → collection-name prefix (`ping` vs `test_ping`) in the shared `(default)` database, because that feature needs the paid Blaze plan and this project is on Spark (free).
+- **`/test/` isn't home-screen-installable**: dropped entirely rather than partially working, because nested URL paths can't produce two independent PWA install identities on Android — a platform limitation, not a bug to keep chasing.
+- Repo also got restructured earlier this session (`docs/`/`setup/` split) at the user's request, ahead of and compatible with this iteration's `/test/` work — see the two Decisions Log entries dated earlier today.
+
+No open blockers. Next: a follow-up TASK.md from the design session — likely the actual case/sample/action data model, now that infra + environments are both proven working.
