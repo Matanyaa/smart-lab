@@ -35,17 +35,23 @@ When the user says **"task complete"**, that means: the current TASK.md's work i
 ## Stack & conventions (from personal App Build Standards)
 - **Frontend:** start with a single `index.html` (HTML/CSS/JS), no build step. Split into separate files only once `index.html` gets unwieldy; a bundler (e.g. Vite) is fine later if needed, not the starting point.
 - **Backend/persistence:** Firebase / Firestore (Native mode).
-- **Hosting:** GitHub Pages, this repo — `github.com/Matanyaa/smart-lab`.
+- **Hosting:** GitHub Pages, this repo — `github.com/Matanyaa/smart-lab`, served from the `/docs` folder (not repo root — see "Repo layout" below).
 - **Deploy:** push to the Pages branch, auto-deploys. Don't auto-refresh the live app silently on a new deploy — use an "update available, refresh?" prompt instead.
 - **Auth:** Firebase Auth's email/password provider, but users log in with a **username**, not a real email — the app maps each username to a synthetic email under the hood (e.g. `username@smart-lab.internal`) before calling Firebase's sign-in. No real personal emails are stored for anyone, including the app owner's own account (see `SPEC.md`'s Authentication section for why, and how password resets work without them). Firestore rules must always be scoped appropriately — never left fully open.
 - Commit and push after each working version/change, not batched at the end.
 - Include a basic web app manifest (name, icons, `start_url`, `display: standalone`) so it can be added to a phone home screen.
 - **Versioning:** MAJOR.MINOR.PATCH starting at `0.1.0`. Bump minor (reset patch) once a feature is done and launched; bump patch for a fix to something already launched; major is TBD (likely `1.0.0` = real day-to-day use). While a version is still being worked on, it carries a `-tNN` suffix (two-digit, e.g. `0.3.0-t01`, `0.3.0-t02`...), dropped once it launches. Display the version near the **top** of the app, not a footer. It also powers the "update available, refresh?" pattern above — see `SPEC.md`'s Versioning and Environments sections for detail.
-- **Environments:** the launched app lives at the repo root; a working/testing build lives in a `/test/` subfolder of the same repo (same GitHub Pages deployment, no branches needed) so colleagues/clients keep seeing the last launched version while testing continues separately. Data is separated via a second Firestore named database (`test`) in the same Firebase project — the launched build uses `(default)`, the `/test/` build uses `test` — rather than a naming-convention prefix, since that's more failure-prone. This split is a near-term follow-up task, not part of the first infra iteration (see `TASK.md`).
+- **Environments:** the launched app lives at `docs/` (the repo's GitHub Pages source, effectively the site root); a working/testing build lives in a `docs/test/` subfolder (same GitHub Pages deployment, no branches needed) so colleagues/clients keep seeing the last launched version while testing continues separately. Data is separated via a second Firestore named database (`test`) in the same Firebase project — the launched build uses `(default)`, the `/test/` build uses `test` — rather than a naming-convention prefix, since that's more failure-prone. This split is a near-term follow-up task — see `TASK.md`.
+
+## Repo layout
+Unlike this project's other personal apps (which just have `index.html` etc. loose at repo root), `smart-lab` keeps the top level clean for the CLAUDE/SPEC/TASK governance docs:
+- **Repo root** — `CLAUDE.md`, `SPEC.md`, `TASK.md`, `app-build-standards.md`. Nothing else.
+- **`docs/`** — the actual app code (`index.html`, `manifest.json`, `icon.svg`, `sw.js`), and this is the GitHub Pages source folder (Settings → Pages → `/docs`), not documentation despite the name. `docs/test/` holds the working/testing build once it exists.
+- **`setup/`** — project setup/reference material that isn't app code and isn't one of the three governance docs: `README.md`, `firestore.rules`.
 
 ## Pre-build setup checklist (user does this manually)
 1. GitHub repo — `github.com/Matanyaa/smart-lab` (empty, no README/gitignore)
-2. Enable GitHub Pages once there's a first commit (Settings → Pages → deploy from branch)
+2. Enable GitHub Pages once there's a first commit (Settings → Pages → deploy from branch → `/docs` folder)
 3. Firebase project (new, or confirm reuse of an existing one)
 4. Firestore enabled, Native mode, pick a region
 5. Firebase Auth enabled — email/password provider (used with synthetic emails, not real ones — see Auth above)
