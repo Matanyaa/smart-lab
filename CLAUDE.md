@@ -26,6 +26,8 @@ Build incrementally regardless — even within one TASK.md, prefer a piece that 
 ## Trigger phrase
 When the user says **"execute"** (or something clearly equivalent, like "go" or "build it"), that means: read `TASK.md` (re-read it even if you've seen an earlier draft — it may have been revised; check its "Task drafted/updated" timestamp against what you last saw) and build exactly what it specifies. Don't ask for scope confirmation — TASK.md *is* the scope. Only stop and ask if TASK.md itself is unclear, blocked (e.g. missing config), or you hit a genuine open question per the paragraph above.
 
+When the user says **"task complete"**, that means: the current TASK.md's work is done and about to be relayed back to the design session. Update TASK.md's completion note (below the `---` at the bottom) to reflect final state, and make sure it states the current app version (the live `APP_VERSION` value, not just the version TASK.md was originally targeting — they can differ if the build needed extra `-tNN` passes).
+
 ## File versioning (so everyone can tell what's current)
 - **TASK.md** carries a header with the app version it's building toward plus a "drafted/updated" date-time — since the task itself might get revised a few times before you ever see it, the timestamp is how you and the user confirm you're both looking at the current draft.
 - **SPEC.md** carries its own version tag in the format `sJ.M.P` (the leading `s` distinguishes it from the app's own version number) — see its "Spec versioning" section for what J/M/P mean. You don't need to maintain this; the design session does.
