@@ -54,3 +54,13 @@ Note: the dual-environment setup (a separate `/test/` build against a second Fir
 - No "update available" logic, per the explicit exclusion — will land once there's a second deployed version to test against.
 
 **Update 2026-09-17:** Firebase web app config received and wired into `index.html` (project `smart-lab-abd80`). Still unconfirmed whether Firestore (Native mode), the Auth email/password provider, and a first test account (Authentication → Users, synthetic-email pattern) exist yet, and whether `firestore.rules` has been published via the Console's Rules tab — see README's "Firebase setup" section for the remaining checklist. Not committed/pushed yet per repo convention (commit after it *works*) — will do once you confirm those and the round-trip test passes.
+
+**Task complete — 2026-09-17. Current app version: `0.1.0-t05`.**
+
+Firebase setup was confirmed done by the user; first commit made (required setting a one-time local git identity — new machine, no global `.gitconfig` yet, since resolved with a global default too), pushed to `github.com/Matanyaa/smart-lab` on `main`, and GitHub Pages enabled. Live at `https://matanyaa.github.io/smart-lab/`. Login + Firestore round-trip confirmed working on both desktop and phone (Android).
+
+Deviations from the original scope, added mid-iteration at the user's request rather than waiting for a follow-up TASK.md:
+- Added a minimal no-op `sw.js` service worker (`t01` → no SW at first; added after `t01` testing showed Android Chrome wasn't offering the home-screen install option — a registered service worker turned out to be part of what's needed there, separate from the manifest itself being valid).
+- Added the "update available, refresh?" banner (explicitly deferred in the original TASK.md scope) once `0.1.0-t02` gave a second deployed version to actually test it against. Matches the existing `calorie-tracker`/`split-builder` pattern: checks on load and on `visibilitychange` (tab foregrounded), not on a timer — a `setInterval` poll was tried and deliberately reverted, since a tab left open and untouched not re-checking was judged acceptable rather than worth the added complexity/battery cost.
+
+Versions `t02`–`t04` were intermediate passes exercising the above (`t04` briefly included the interval poll, reverted in `t05`). No open blockers. Next: a follow-up TASK.md from the design session for the actual case/sample/action data model.
