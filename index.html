@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Smart Lab</title>
+<link rel="icon" type="image/svg+xml" href="icon.svg">
+<link rel="apple-touch-icon" href="icon.svg">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#141a1f">
+<style>
+  :root{
+    --bg:#141a1f; --panel:#1c242b; --panel2:#222c34; --border:#2e3a43; --border-soft:#283440;
+    --text:#eef2f4; --text-dim:#9aa7af; --text-mute:#69747c;
+    --accent:#4ac98f; --accent-dim:#2f7a58; --accent-text:#0d1a14;
+    --warn:#d9a441; --err:#d96a4a;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+    font-size:15px; line-height:1.4;
+  }
+  a{color:var(--accent);}
+  .hidden{display:none !important;}
+  .btn{background:var(--panel2); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:9px 14px; font:inherit; cursor:pointer;}
+  .btn:hover{border-color:var(--accent-dim);}
+  .btn:disabled{opacity:0.5; cursor:default;}
+  .btn-primary{background:var(--accent); color:var(--accent-text); border-color:var(--accent);}
+  .btn-primary:hover{border-color:var(--accent);}
+  input{
+    background:var(--panel2); color:var(--text); border:1px solid var(--border); border-radius:8px;
+    padding:10px 12px; font:inherit; width:100%;
+  }
+  input:focus{outline:none; border-color:var(--accent-dim);}
+  label{display:block; font-size:13px; color:var(--text-dim); margin:0 0 6px;}
+
+  header{
+    display:flex; align-items:center; gap:10px; padding:10px 16px;
+    border-bottom:1px solid var(--border-soft); background:var(--panel);
+  }
+  header h1{font-size:16px; margin:0; font-weight:700;}
+  .badge{display:inline-block; padding:1px 8px; border-radius:10px; background:var(--panel2); border:1px solid var(--border); font-size:11px; color:var(--text-dim);}
+
+  main{min-height:calc(100vh - 45px); display:flex; flex-direction:column; align-items:center; justify-content:center; padding:24px;}
+  .card{background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:32px 28px; max-width:360px; width:100%;}
+  .card h2{margin:0 0 20px; font-size:20px;}
+  .field{margin-bottom:14px;}
+  .error{color:var(--err); font-size:13px; margin-top:10px; min-height:16px;}
+  .muted{color:var(--text-dim); font-size:13px;}
+
+  #appScreen .card{max-width:420px;}
+  #appScreen .row{display:flex; gap:10px; margin-top:16px;}
+  #pingResult{
+    margin-top:16px; background:var(--panel2); border:1px solid var(--border); border-radius:8px;
+    padding:10px 12px; font-size:13px; color:var(--text-dim); white-space:pre-wrap; word-break:break-word;
+    text-align:left; min-height:20px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>smart-lab</h1>
+  <span class="badge" id="versionBadge"></span>
+</header>
+
+<main>
+
+  <div id="loginScreen" class="card">
+    <h2>Log in</h2>
+    <form id="loginForm">
+      <div class="field">
+        <label for="username">Username</label>
+        <input type="text" id="username" autocomplete="username" required>
+      </div>
+      <div class="field">
+        <label for="password">Password</label>
+        <input type="password" id="password" autocomplete="current-password" required>
+      </div>
+      <button type="submit" class="btn btn-primary" id="loginBtn" style="width:100%;">Log in</button>
+      <div class="error" id="loginError"></div>
+    </form>
+  </div>
+
+  <div id="appScreen" class="card hidden">
+    <h2>Signed in as <span id="whoami"></span></h2>
+    <p class="muted">This confirms auth + Firestore are wired up correctly. No case data yet.</p>
+    <div class="row">
+      <button class="btn" id="pingBtn">Test Firestore round-trip</button>
+      <button class="btn" id="logoutBtn">Log out</button>
+    </div>
+    <div id="pingResult"></div>
+  </div>
+
+</main>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+import {
+  getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged
+} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+import {
+  getFirestore, doc, setDoc, getDoc, serverTimestamp
+} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+
+const APP_VERSION = '0.1.0-t01';
+document.getElementById('versionBadge').textContent = `v${APP_VERSION}`;
+
+// --- Firebase config ---
+// Safe to keep client-side: Firebase web app config is not a secret key,
+// it's an identifier — access is enforced by Firestore/Auth rules instead.
+const firebaseConfig = {
+  apiKey: "AIzaSyDYCpHcQ640_QXXa9YOVPlh-JdYbXJD40I",
+  authDomain: "smart-lab-abd80.firebaseapp.com",
+  projectId: "smart-lab-abd80",
+  storageBucket: "smart-lab-abd80.firebasestorage.app",
+  messagingSenderId: "82399096157",
+  appId: "1:82399096157:web:e99b37e6efa3654f5c8cb4"
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+const loginScreen = document.getElementById('loginScreen');
+const appScreen = document.getElementById('appScreen');
+const loginForm = document.getElementById('loginForm');
+const loginBtn = document.getElementById('loginBtn');
+const loginError = document.getElementById('loginError');
+const whoami = document.getElementById('whoami');
+const pingBtn = document.getElementById('pingBtn');
+const pingResult = document.getElementById('pingResult');
+const logoutBtn = document.getElementById('logoutBtn');
+
+const USERNAME_DOMAIN = 'smart-lab.internal';
+
+loginForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  loginError.textContent = '';
+  loginBtn.disabled = true;
+  const username = document.getElementById('username').value.trim();
+  const password = document.getElementById('password').value;
+  const email = `${username}@${USERNAME_DOMAIN}`;
+  try {
+    await signInWithEmailAndPassword(auth, email, password);
+  } catch (err) {
+    loginError.textContent = 'Login failed: check username and password.';
+  } finally {
+    loginBtn.disabled = false;
+  }
+});
+
+logoutBtn.addEventListener('click', () => signOut(auth));
+
+pingBtn.addEventListener('click', async () => {
+  pingBtn.disabled = true;
+  pingResult.textContent = 'Writing...';
+  try {
+    const ref = doc(db, 'ping', 'latest');
+    await setDoc(ref, {
+      timestamp: serverTimestamp(),
+      by: auth.currentUser.email
+    });
+    pingResult.textContent = 'Reading back...';
+    const snap = await getDoc(ref);
+    pingResult.textContent = snap.exists()
+      ? `Round-trip OK:\n${JSON.stringify(snap.data(), null, 2)}`
+      : 'Wrote doc but read-back found nothing.';
+  } catch (err) {
+    pingResult.textContent = `Round-trip failed: ${err.message}`;
+  } finally {
+    pingBtn.disabled = false;
+  }
+});
+
+onAuthStateChanged(auth, (user) => {
+  if (user) {
+    loginScreen.classList.add('hidden');
+    appScreen.classList.remove('hidden');
+    whoami.textContent = user.email.replace(`@${USERNAME_DOMAIN}`, '');
+    pingResult.textContent = '';
+    loginForm.reset();
+  } else {
+    appScreen.classList.add('hidden');
+    loginScreen.classList.remove('hidden');
+  }
+});
+</script>
+</body>
+</html>

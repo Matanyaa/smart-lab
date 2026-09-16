@@ -1,0 +1,17 @@
+{
+  "name": "Smart Lab",
+  "short_name": "Smart Lab",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#141a1f",
+  "theme_color": "#141a1f",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
