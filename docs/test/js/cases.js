@@ -382,6 +382,12 @@ function buildLifecycleSection(c, samples) {
       btn.disabled = samples.length === 0;
       btn.addEventListener('click', async () => {
         await updateDoc(doc(db, 'cases', c.id), { stage: 'lab' });
+        // Covers the edge case where every action was already executed
+        // before "Start lab" was even clicked (e.g. front-loaded during
+        // setup) -- without this, the case would sit in "lab" forever,
+        // since auto-advance otherwise only re-checks when an action is
+        // executed, which would never happen again.
+        await maybeAutoAdvanceToWriting(c.id);
         await renderCaseDetail(c.id);
       });
       section.appendChild(btn);
