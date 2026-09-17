@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Smart Lab</title>
-<link rel="icon" type="image/svg+xml" href="icon.svg?v=0.3.1">
-<link rel="apple-touch-icon" href="icon.svg?v=0.3.1">
+<link rel="icon" type="image/svg+xml" href="icon.svg?v=0.3.2">
+<link rel="apple-touch-icon" href="icon.svg?v=0.3.2">
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#141a1f">
 <style>
@@ -94,7 +94,7 @@
 </div>
 
 <header>
-  <h1><img src="icon.svg?v=0.3.1" alt="">smart-lab</h1>
+  <h1><img src="icon.svg?v=0.3.2" alt="">smart-lab</h1>
   <span class="badge" id="versionBadge"></span>
   <span class="greeting hidden" id="greeting"></span>
   <button class="btn btn-small hidden" id="showChangePasswordBtn">Change password</button>
@@ -193,7 +193,7 @@ import {
 // cache on every deploy (icon color/shape changes were sticking around
 // for up to 10 minutes otherwise, GitHub Pages' Cache-Control). Bump
 // those alongside this constant on every version change.
-const APP_VERSION = '0.3.1';
+const APP_VERSION = '0.3.2';
 document.getElementById('versionBadge').textContent = `v${APP_VERSION}`;
 
 // --- Firebase config ---
@@ -314,7 +314,13 @@ onAuthStateChanged(auth, async (user) => {
   greeting.textContent = '';
   const nameEl = document.createElement('strong');
   nameEl.textContent = profile.username;
-  greeting.append('Hello ', nameEl, ` — ${profile.role}`);
+  // Admin's username and role are effectively the same word -- "Hello
+  // admin -- admin" reads as redundant, so admin gets just the name.
+  if (profile.role === 'admin') {
+    greeting.append('Hello ', nameEl);
+  } else {
+    greeting.append('Hello ', nameEl, ` — ${profile.role}`);
+  }
   greeting.classList.remove('hidden');
 
   if (profile.role === 'admin') {
