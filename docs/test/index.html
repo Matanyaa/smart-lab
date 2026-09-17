@@ -26,11 +26,12 @@
   .btn:disabled{opacity:0.5; cursor:default;}
   .btn-primary{background:var(--accent); color:var(--accent-text); border-color:var(--accent);}
   .btn-primary:hover{border-color:var(--accent);}
-  input{
+  .btn-small{padding:4px 9px; font-size:12px; border-radius:6px;}
+  input, select{
     background:var(--panel2); color:var(--text); border:1px solid var(--border); border-radius:8px;
     padding:10px 12px; font:inherit; width:100%;
   }
-  input:focus{outline:none; border-color:var(--accent-dim);}
+  input:focus, select:focus{outline:none; border-color:var(--accent-dim);}
   label{display:block; font-size:13px; color:var(--text-dim); margin:0 0 6px;}
 
   header{
@@ -40,20 +41,33 @@
   header h1{font-size:16px; margin:0; font-weight:700;}
   .badge{display:inline-block; padding:1px 8px; border-radius:10px; background:var(--panel2); border:1px solid var(--border); font-size:11px; color:var(--text-dim);}
 
-  main{min-height:calc(100vh - 45px); display:flex; flex-direction:column; align-items:center; justify-content:center; padding:24px;}
-  .card{background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:32px 28px; max-width:360px; width:100%;}
+  main{min-height:calc(100vh - 45px); display:flex; flex-direction:column; align-items:center; padding:24px; gap:20px;}
+  .card{background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:32px 28px; max-width:360px; width:100%; margin:auto;}
   .card h2{margin:0 0 20px; font-size:20px;}
   .field{margin-bottom:14px;}
   .error{color:var(--err); font-size:13px; margin-top:10px; min-height:16px;}
   .muted{color:var(--text-dim); font-size:13px;}
 
-  #appScreen .card{max-width:420px;}
+  #loginScreen.card{margin:auto;}
+  #appScreen{max-width:420px; width:100%; margin:0 auto;}
   #appScreen .row{display:flex; gap:10px; margin-top:16px;}
   #pingResult{
     margin-top:16px; background:var(--panel2); border:1px solid var(--border); border-radius:8px;
     padding:10px 12px; font-size:13px; color:var(--text-dim); white-space:pre-wrap; word-break:break-word;
     text-align:left; min-height:20px;
   }
+
+  #adminScreen{max-width:560px; width:100%; margin:0 auto;}
+  #adminScreen .add-row{display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end;}
+  #adminScreen .add-row .field{flex:1; min-width:110px; margin-bottom:0;}
+  #adminScreen .checkbox-field{display:flex; align-items:center; gap:6px; padding-bottom:10px;}
+  #adminScreen .checkbox-field label{margin:0;}
+  #adminScreen .checkbox-field input{width:auto;}
+
+  table.user-list{width:100%; border-collapse:collapse; margin-top:10px; font-size:13px;}
+  table.user-list th, table.user-list td{padding:8px 6px; border-bottom:1px solid var(--border-soft); text-align:left; vertical-align:middle;}
+  table.user-list select{padding:5px 6px; width:auto;}
+  table.user-list .reissue-row input{width:120px; display:inline-block;}
 
   #updateBanner{display:none; align-items:center; gap:10px; padding:8px 14px; background:var(--warn); color:#25200a; font-size:13px;}
   #updateBanner button{border:1px solid #25200a55; background:transparent; color:#25200a; border-radius:6px; padding:4px 10px; font:inherit; cursor:pointer;}
@@ -70,6 +84,7 @@
 <header>
   <h1>smart-lab</h1>
   <span class="badge" id="versionBadge"></span>
+  <span class="badge hidden" id="roleBadge"></span>
 </header>
 
 <main>
@@ -100,18 +115,55 @@
     <div id="pingResult"></div>
   </div>
 
+  <div id="adminScreen" class="card hidden">
+    <h2>Admin — users</h2>
+    <form id="addUserForm">
+      <div class="add-row">
+        <div class="field">
+          <label for="newUsername">Username</label>
+          <input type="text" id="newUsername" required>
+        </div>
+        <div class="field">
+          <label for="newPassword">Password</label>
+          <input type="password" id="newPassword" required>
+        </div>
+        <div class="field">
+          <label for="newRole">Role</label>
+          <select id="newRole">
+            <option value="client">Client</option>
+            <option value="team_leader">Team leader</option>
+            <option value="worker">Worker</option>
+            <option value="admin">Admin</option>
+          </select>
+        </div>
+        <div class="checkbox-field">
+          <input type="checkbox" id="newVerifier">
+          <label for="newVerifier">Verifier</label>
+        </div>
+        <button type="submit" class="btn btn-primary" id="addUserBtn">Add user</button>
+      </div>
+      <div class="error" id="addUserError"></div>
+    </form>
+    <table class="user-list">
+      <thead>
+        <tr><th>Username</th><th>Role</th><th>Verifier</th><th>Status</th><th></th></tr>
+      </thead>
+      <tbody id="userListBody"></tbody>
+    </table>
+  </div>
+
 </main>
 
 <script type="module">
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+import { initializeApp, deleteApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
 import {
-  getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged
+  getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
 import {
-  getFirestore, doc, setDoc, getDoc, serverTimestamp
+  getFirestore, doc, getDoc, setDoc, updateDoc, collection, getDocs, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 
-const APP_VERSION = '0.2.0-t01';
+const APP_VERSION = '0.3.0-t01';
 document.getElementById('versionBadge').textContent = `v${APP_VERSION}`;
 
 // --- Firebase config ---
@@ -133,27 +185,39 @@ const auth = getAuth(app);
 // (test_ping vs ping) until/unless the project moves to Blaze.
 const db = getFirestore(app);
 
+const USERNAME_DOMAIN = 'smart-lab.internal';
+
 const loginScreen = document.getElementById('loginScreen');
 const appScreen = document.getElementById('appScreen');
+const adminScreen = document.getElementById('adminScreen');
 const loginForm = document.getElementById('loginForm');
 const loginBtn = document.getElementById('loginBtn');
 const loginError = document.getElementById('loginError');
 const whoami = document.getElementById('whoami');
+const roleBadge = document.getElementById('roleBadge');
 const pingBtn = document.getElementById('pingBtn');
 const pingResult = document.getElementById('pingResult');
 const logoutBtn = document.getElementById('logoutBtn');
 
-const USERNAME_DOMAIN = 'smart-lab.internal';
+let currentProfile = null; // { uid, username, role, verifier, status }
 
+// ---------------------------------------------------------------------
+// Login: username -> usernames/{username}.authEmail -> sign in with that
+// email. The username is the stable identifier everything else should
+// eventually reference (see users/{uid} doc note below) — the uid behind
+// it can be swapped out later via reissue without anything else changing.
+// ---------------------------------------------------------------------
 loginForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   loginError.textContent = '';
   loginBtn.disabled = true;
   const username = document.getElementById('username').value.trim();
   const password = document.getElementById('password').value;
-  const email = `${username}@${USERNAME_DOMAIN}`;
   try {
-    await signInWithEmailAndPassword(auth, email, password);
+    const usernameSnap = await getDoc(doc(db, 'usernames', username));
+    if (!usernameSnap.exists()) throw new Error('no-such-username');
+    const { authEmail } = usernameSnap.data();
+    await signInWithEmailAndPassword(auth, authEmail, password);
   } catch (err) {
     loginError.textContent = 'Login failed: check username and password.';
   } finally {
@@ -184,18 +248,244 @@ pingBtn.addEventListener('click', async () => {
   }
 });
 
-onAuthStateChanged(auth, (user) => {
-  if (user) {
-    loginScreen.classList.add('hidden');
-    appScreen.classList.remove('hidden');
-    whoami.textContent = user.email.replace(`@${USERNAME_DOMAIN}`, '');
-    pingResult.textContent = '';
-    loginForm.reset();
-  } else {
+onAuthStateChanged(auth, async (user) => {
+  if (!user) {
     appScreen.classList.add('hidden');
+    adminScreen.classList.add('hidden');
+    roleBadge.classList.add('hidden');
     loginScreen.classList.remove('hidden');
+    currentProfile = null;
+    return;
+  }
+
+  loginScreen.classList.add('hidden');
+  appScreen.classList.remove('hidden');
+  pingResult.textContent = '';
+  loginForm.reset();
+
+  const profileSnap = await getDoc(doc(db, 'users', user.uid));
+  if (!profileSnap.exists()) {
+    whoami.textContent = user.email;
+    roleBadge.classList.add('hidden');
+    adminScreen.classList.add('hidden');
+    currentProfile = null;
+    return;
+  }
+  const profile = profileSnap.data();
+  currentProfile = { uid: user.uid, ...profile };
+
+  whoami.textContent = profile.username;
+  roleBadge.textContent = profile.role + (profile.verifier ? ' · Verifier' : '');
+  roleBadge.classList.remove('hidden');
+
+  if (profile.role === 'admin') {
+    adminScreen.classList.remove('hidden');
+    loadUserList();
+  } else {
+    adminScreen.classList.add('hidden');
   }
 });
+
+// ---------------------------------------------------------------------
+// Admin: add user + edit role/verifier/status + reissue password.
+// Convenience-only gating here (hide the screen) -- the actual protection
+// is the isAdmin() check in setup/firestore.rules.
+// ---------------------------------------------------------------------
+const addUserForm = document.getElementById('addUserForm');
+const addUserBtn = document.getElementById('addUserBtn');
+const addUserError = document.getElementById('addUserError');
+const newRoleSelect = document.getElementById('newRole');
+const newVerifierCheckbox = document.getElementById('newVerifier');
+const userListBody = document.getElementById('userListBody');
+
+newRoleSelect.addEventListener('change', () => {
+  if (newRoleSelect.value === 'client') {
+    newVerifierCheckbox.checked = false;
+    newVerifierCheckbox.disabled = true;
+  } else {
+    newVerifierCheckbox.disabled = false;
+  }
+});
+
+// Creating a new Firebase Auth account signs that account in on whatever
+// auth instance made the call -- so it's done on a throwaway secondary
+// app instance instead of the primary one, to avoid signing the admin
+// out of their own session.
+async function createAuthAccountWithoutSigningOut(email, password) {
+  const secondaryApp = initializeApp(firebaseConfig, `secondary-${Date.now()}`);
+  const secondaryAuth = getAuth(secondaryApp);
+  try {
+    const cred = await createUserWithEmailAndPassword(secondaryAuth, email, password);
+    return cred.user.uid;
+  } finally {
+    await signOut(secondaryAuth).catch(() => {});
+    await deleteApp(secondaryApp).catch(() => {});
+  }
+}
+
+addUserForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  addUserError.textContent = '';
+  addUserBtn.disabled = true;
+  const username = document.getElementById('newUsername').value.trim();
+  const password = document.getElementById('newPassword').value;
+  const role = newRoleSelect.value;
+  const verifier = role !== 'client' && newVerifierCheckbox.checked;
+  const authEmail = `${username}@${USERNAME_DOMAIN}`;
+  try {
+    const newUid = await createAuthAccountWithoutSigningOut(authEmail, password);
+    // username is the stable identifier -- a future case/sample/action
+    // model should reference people by username, never by uid, since the
+    // uid behind a username can change via reissue (see Step 4).
+    await setDoc(doc(db, 'users', newUid), { username, role, verifier, status: 'active' });
+    await setDoc(doc(db, 'usernames', username), { authEmail });
+    addUserForm.reset();
+    newVerifierCheckbox.disabled = false;
+    loadUserList();
+  } catch (err) {
+    addUserError.textContent = err.code === 'auth/email-already-in-use'
+      ? 'That username is already taken.'
+      : `Couldn't add user: ${err.message}`;
+  } finally {
+    addUserBtn.disabled = false;
+  }
+});
+
+async function loadUserList() {
+  userListBody.innerHTML = '<tr><td colspan="5" class="muted">Loading…</td></tr>';
+  const snap = await getDocs(collection(db, 'users'));
+  const rows = [];
+  snap.forEach((d) => rows.push({ uid: d.id, ...d.data() }));
+  rows.sort((a, b) => a.username.localeCompare(b.username));
+
+  userListBody.innerHTML = '';
+  rows.forEach((u) => userListBody.appendChild(renderUserRow(u)));
+}
+
+function renderUserRow(u) {
+  const tr = document.createElement('tr');
+
+  const roleSelect = document.createElement('select');
+  ['client', 'team_leader', 'worker', 'admin'].forEach((r) => {
+    const opt = document.createElement('option');
+    opt.value = r;
+    opt.textContent = r;
+    if (r === u.role) opt.selected = true;
+    roleSelect.appendChild(opt);
+  });
+
+  const verifierCheckbox = document.createElement('input');
+  verifierCheckbox.type = 'checkbox';
+  verifierCheckbox.checked = !!u.verifier;
+  verifierCheckbox.disabled = u.role === 'client';
+
+  const statusSelect = document.createElement('select');
+  ['active', 'disabled'].forEach((s) => {
+    const opt = document.createElement('option');
+    opt.value = s;
+    opt.textContent = s;
+    if (s === u.status) opt.selected = true;
+    statusSelect.appendChild(opt);
+  });
+
+  async function saveField(field, value) {
+    await updateDoc(doc(db, 'users', u.uid), { [field]: value });
+  }
+  roleSelect.addEventListener('change', () => {
+    const role = roleSelect.value;
+    if (role === 'client') {
+      verifierCheckbox.checked = false;
+      verifierCheckbox.disabled = true;
+      saveField('verifier', false);
+    } else {
+      verifierCheckbox.disabled = false;
+    }
+    saveField('role', role);
+  });
+  verifierCheckbox.addEventListener('change', () => saveField('verifier', verifierCheckbox.checked));
+  statusSelect.addEventListener('change', () => saveField('status', statusSelect.value));
+
+  const usernameTd = document.createElement('td');
+  usernameTd.textContent = u.username;
+  const roleTd = document.createElement('td'); roleTd.appendChild(roleSelect);
+  const verifierTd = document.createElement('td'); verifierTd.appendChild(verifierCheckbox);
+  const statusTd = document.createElement('td'); statusTd.appendChild(statusSelect);
+
+  const actionTd = document.createElement('td');
+  const reissueBtn = document.createElement('button');
+  reissueBtn.type = 'button';
+  reissueBtn.className = 'btn btn-small';
+  reissueBtn.textContent = 'Reissue';
+  actionTd.appendChild(reissueBtn);
+
+  tr.appendChild(usernameTd);
+  tr.appendChild(roleTd);
+  tr.appendChild(verifierTd);
+  tr.appendChild(statusTd);
+  tr.appendChild(actionTd);
+
+  reissueBtn.addEventListener('click', () => {
+    if (tr.querySelector('.reissue-row')) return; // already open
+    const reissueTr = document.createElement('tr');
+    reissueTr.className = 'reissue-row';
+    const td = document.createElement('td');
+    td.colSpan = 5;
+    const input = document.createElement('input');
+    input.type = 'password';
+    input.placeholder = 'New password';
+    const confirmBtn = document.createElement('button');
+    confirmBtn.type = 'button';
+    confirmBtn.className = 'btn btn-small btn-primary';
+    confirmBtn.textContent = 'Confirm';
+    confirmBtn.style.marginLeft = '8px';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'btn btn-small';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.style.marginLeft = '8px';
+    const errSpan = document.createElement('span');
+    errSpan.className = 'error';
+    errSpan.style.marginLeft = '8px';
+
+    cancelBtn.addEventListener('click', () => reissueTr.remove());
+    confirmBtn.addEventListener('click', () => reissueUser(u, input.value, errSpan, confirmBtn));
+
+    td.appendChild(input);
+    td.appendChild(confirmBtn);
+    td.appendChild(cancelBtn);
+    td.appendChild(errSpan);
+    reissueTr.appendChild(td);
+    tr.after(reissueTr);
+  });
+
+  return tr;
+}
+
+// ---------------------------------------------------------------------
+// Step 4: reissue. Not a true Admin-SDK password reset (still needs
+// Blaze) -- creates a brand-new Auth account under a disambiguated email,
+// copies the profile over, disables the old account's doc, and repoints
+// usernames/{username} at the new account. Net effect for the user: same
+// username, new password, everything else unchanged.
+// ---------------------------------------------------------------------
+async function reissueUser(u, newPassword, errSpan, confirmBtn) {
+  if (!newPassword) { errSpan.textContent = 'Enter a password.'; return; }
+  confirmBtn.disabled = true;
+  errSpan.textContent = '';
+  try {
+    const disambiguatedEmail = `${u.username}.r${Date.now()}@${USERNAME_DOMAIN}`;
+    const newUid = await createAuthAccountWithoutSigningOut(disambiguatedEmail, newPassword);
+    await setDoc(doc(db, 'users', newUid), {
+      username: u.username, role: u.role, verifier: !!u.verifier, status: 'active'
+    });
+    await updateDoc(doc(db, 'users', u.uid), { status: 'disabled' });
+    await updateDoc(doc(db, 'usernames', u.username), { authEmail: disambiguatedEmail });
+    loadUserList();
+  } catch (err) {
+    errSpan.textContent = `Failed: ${err.message}`;
+    confirmBtn.disabled = false;
+  }
+}
 
 async function checkForUpdate(){
   try{

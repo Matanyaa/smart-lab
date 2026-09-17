@@ -23,8 +23,9 @@ governance docs.
    `<username>@smart-lab.internal` (e.g. `matanya@smart-lab.internal`) with
    a password. Log into the app using just `matanya` as the username.
 4. **Security rules** — Firestore Database → Rules → paste in the contents of
-   `firestore.rules` (this folder) → Publish. (Scopes all reads/writes to
-   signed-in users only; role-based rules come in a later iteration.)
+   `firestore.rules` (this folder) → Publish. As of iteration 3, this scopes
+   `users`/`usernames` to admin-gated read/write (see below) and everything
+   else (`ping`, `test_ping`) to signed-in users only.
 
 ## Test environment (`docs/test/`)
 
@@ -48,6 +49,34 @@ with no way to exclude a subpath). Access `/test/` via a browser bookmark/tab
 instead. See `SPEC.md`'s Decisions Log for the full story and the rejected
 alternative (a separate repo/sibling path, which would genuinely fix it but
 costs a second repo to keep in sync).
+
+## Admin bootstrap for `docs/test/` (iteration 3, `0.3.0-t01`)
+
+`docs/test/` now logs in via a `usernames/{username}` → `users/{uid}` lookup
+instead of the old fixed formula, and role/admin access is gated by a `role`
+field on `users/{uid}`. No admin exists yet the first time, so the first
+admin account has to be created by hand, once, directly in the Firebase
+Console (the app can't do this itself — role-editing is admin-gated, and
+there's no admin yet to grant it):
+
+1. **Find your existing account's UID** — Authentication → Users → find the
+   account you've been testing with (e.g. `matanya@smart-lab.internal`) →
+   copy its **User UID** column value.
+2. **Create its Firestore profile** — Firestore Database → Data → start a
+   new document:
+   - Collection: `users`, **Document ID: paste the UID from step 1** (not
+     auto-generated).
+   - Fields: `username` (string, e.g. `matanya`), `role` (string, `admin`),
+     `verifier` (boolean, `false`), `status` (string, `active`).
+3. **Create the username lookup doc** — same Data tab, new document:
+   - Collection: `usernames`, **Document ID: the username itself** (e.g.
+     `matanya`, not the UID).
+   - Fields: `authEmail` (string, the full synthetic email from step 1, e.g.
+     `matanya@smart-lab.internal`).
+4. Log into `docs/test/` with that username + its existing password — the
+   admin screen should now appear. From there, every other account (client,
+   team_leader, worker) can be added through the app itself; this manual
+   step is only ever needed once, for the first admin.
 
 ## Hosting
 

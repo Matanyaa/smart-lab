@@ -70,3 +70,17 @@ Using the admin screen:
 ---
 
 *(Claude Code: add your completion note below this line.)*
+
+**Done — 2026-09-17.** Built in `docs/test/index.html`: `users/{uid}` + `usernames/{username}` model, admin-gated `setup/firestore.rules`, admin screen (add user, inline role/verifier/status editing), and reissue. `docs/test/index.html` bumped to `0.3.0-t01`.
+
+- Login flow now does the `usernames/{username}` → `authEmail` lookup before `signInWithEmailAndPassword`, per rev 2's spec.
+- Admin screen only renders when the signed-in user's own `users/{uid}.role === "admin"`; the real protection is in the rules, not this check.
+- Add-user and reissue both use a uniquely-named secondary Firebase app instance (`secondary-${Date.now()}`) to create the new Auth account without disturbing the admin's own session, then write Firestore from the primary session.
+- Reissue's disambiguated email: `${username}.r${Date.now()}@smart-lab.internal`.
+- Rewrote `setup/firestore.rules` rather than extending it — the prior blanket "any signed-in user" rule would have silently bypassed the new admin-only gates if left in place alongside them (Firestore rules are permissive-OR across matching blocks). Full reasoning and exact rules in `SPEC.md`'s Decisions Log.
+- Wrote the one-time admin-bootstrap steps into `setup/README.md` (UID-keyed `users` doc + username-keyed `usernames` doc, created by hand in the Console).
+- Root (`docs/index.html`) untouched, stays on the old fixed-formula login as scoped — still plain `0.1.0`.
+
+**Deviation:** left `status: "disabled"` as a tracked/editable field with no enforcement yet (doesn't block login) — matches this task's own "no feature-level restriction beyond hiding the admin screen" scope note, flagged with a comment in the rules file rather than silently built further.
+
+**Verification needed from you (Step 5):** bootstrap your admin account per `setup/README.md`'s new section, then from the admin screen add a `client`, `team_leader`, and `worker` (verifier tag on one of the latter two), confirm each logs in with the correct role/tag shown and no admin screen, then reissue one non-admin account's password and confirm the old password stops working while the new one logs into the same username with role/verifier/status unchanged. Also worth a direct check that a non-admin's browser console can't read another user's `users/{uid}` doc (rules should reject it, not just the UI hiding it).
