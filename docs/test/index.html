@@ -41,6 +41,8 @@
   header h1{font-size:16px; margin:0; font-weight:700; display:flex; align-items:center; gap:8px;}
   header h1 img{width:22px; height:22px; display:block;}
   .badge{display:inline-block; padding:1px 8px; border-radius:10px; background:var(--panel2); border:1px solid var(--border); font-size:11px; color:var(--text-dim);}
+  .greeting{font-size:13px; color:var(--text-dim);}
+  .greeting strong{color:var(--text); font-weight:600;}
   #showChangePasswordBtn{margin-left:auto;}
 
   main{min-height:calc(100vh - 45px); display:flex; flex-direction:column; align-items:center; padding:24px; gap:20px;}
@@ -92,7 +94,7 @@
 <header>
   <h1><img src="icon.svg" alt="">smart-lab</h1>
   <span class="badge" id="versionBadge"></span>
-  <span class="badge hidden" id="roleBadge"></span>
+  <span class="greeting hidden" id="greeting"></span>
   <button class="btn btn-small hidden" id="showChangePasswordBtn">Change password</button>
   <button class="btn btn-small hidden" id="logoutBtn">Log out</button>
 </header>
@@ -184,7 +186,7 @@ import {
   getFirestore, doc, getDoc, setDoc, updateDoc, collection, getDocs
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 
-const APP_VERSION = '0.3.0-t06';
+const APP_VERSION = '0.3.0-t07';
 document.getElementById('versionBadge').textContent = `v${APP_VERSION}`;
 
 // --- Firebase config ---
@@ -214,7 +216,7 @@ const adminScreen = document.getElementById('adminScreen');
 const loginForm = document.getElementById('loginForm');
 const loginBtn = document.getElementById('loginBtn');
 const loginError = document.getElementById('loginError');
-const roleBadge = document.getElementById('roleBadge');
+const greeting = document.getElementById('greeting');
 const logoutBtn = document.getElementById('logoutBtn');
 const showChangePasswordBtn = document.getElementById('showChangePasswordBtn');
 const changePasswordForm = document.getElementById('changePasswordForm');
@@ -278,7 +280,7 @@ logoutBtn.addEventListener('click', () => signOut(auth));
 onAuthStateChanged(auth, async (user) => {
   if (!user) {
     adminScreen.classList.add('hidden');
-    roleBadge.classList.add('hidden');
+    greeting.classList.add('hidden');
     logoutBtn.classList.add('hidden');
     showChangePasswordBtn.classList.add('hidden');
     loginScreen.classList.remove('hidden');
@@ -297,7 +299,7 @@ onAuthStateChanged(auth, async (user) => {
 
   const profileSnap = await getDoc(doc(db, 'users', user.uid));
   if (!profileSnap.exists()) {
-    roleBadge.classList.add('hidden');
+    greeting.classList.add('hidden');
     adminScreen.classList.add('hidden');
     currentProfile = null;
     return;
@@ -305,8 +307,11 @@ onAuthStateChanged(auth, async (user) => {
   const profile = profileSnap.data();
   currentProfile = { uid: user.uid, ...profile };
 
-  roleBadge.textContent = profile.role;
-  roleBadge.classList.remove('hidden');
+  greeting.textContent = '';
+  const nameEl = document.createElement('strong');
+  nameEl.textContent = profile.username;
+  greeting.append('Hello ', nameEl, ` — ${profile.role}`);
+  greeting.classList.remove('hidden');
 
   if (profile.role === 'admin') {
     adminScreen.classList.remove('hidden');
