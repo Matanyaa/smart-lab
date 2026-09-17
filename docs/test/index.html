@@ -10,7 +10,7 @@
   :root{
     --bg:#141a1f; --panel:#1c242b; --panel2:#222c34; --border:#2e3a43; --border-soft:#283440;
     --text:#eef2f4; --text-dim:#9aa7af; --text-mute:#69747c;
-    --accent:#4ac98f; --accent-dim:#2f7a58; --accent-text:#0d1a14;
+    --accent:#f5a623; --accent-dim:#a86a17; --accent-text:#0d1a14;
     --warn:#d9a441; --err:#d96a4a;
   }
   *{box-sizing:border-box;}
@@ -41,6 +41,7 @@
   header h1{font-size:16px; margin:0; font-weight:700; display:flex; align-items:center; gap:8px;}
   header h1 img{width:22px; height:22px; display:block;}
   .badge{display:inline-block; padding:1px 8px; border-radius:10px; background:var(--panel2); border:1px solid var(--border); font-size:11px; color:var(--text-dim);}
+  #logoutBtn{margin-left:auto;}
 
   main{min-height:calc(100vh - 45px); display:flex; flex-direction:column; align-items:center; padding:24px; gap:20px;}
   .card{background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:32px 28px; max-width:360px; width:100%; margin:auto;}
@@ -51,7 +52,6 @@
 
   #loginScreen.card{margin:auto;}
   #appScreen{max-width:420px; width:100%; margin:0 auto;}
-  #appScreen .row{display:flex; gap:10px; margin-top:16px;}
 
   #adminScreen{max-width:560px; width:100%; margin:0 auto;}
   #adminScreen .add-row{display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end;}
@@ -81,6 +81,7 @@
   <h1><img src="icon.svg" alt="">smart-lab</h1>
   <span class="badge" id="versionBadge"></span>
   <span class="badge hidden" id="roleBadge"></span>
+  <button class="btn btn-small hidden" id="logoutBtn">Log out</button>
 </header>
 
 <main>
@@ -104,9 +105,6 @@
   <div id="appScreen" class="card hidden">
     <h2>Signed in as <span id="whoami"></span></h2>
     <p class="muted">No case data yet.</p>
-    <div class="row">
-      <button class="btn" id="logoutBtn">Log out</button>
-    </div>
   </div>
 
   <div id="adminScreen" class="card hidden">
@@ -159,7 +157,7 @@ import {
   getFirestore, doc, getDoc, setDoc, updateDoc, collection, getDocs
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 
-const APP_VERSION = '0.3.0-t03';
+const APP_VERSION = '0.3.0-t04';
 document.getElementById('versionBadge').textContent = `v${APP_VERSION}`;
 
 // --- Firebase config ---
@@ -227,6 +225,7 @@ onAuthStateChanged(auth, async (user) => {
     appScreen.classList.add('hidden');
     adminScreen.classList.add('hidden');
     roleBadge.classList.add('hidden');
+    logoutBtn.classList.add('hidden');
     loginScreen.classList.remove('hidden');
     currentProfile = null;
     return;
@@ -234,6 +233,7 @@ onAuthStateChanged(auth, async (user) => {
 
   loginScreen.classList.add('hidden');
   appScreen.classList.remove('hidden');
+  logoutBtn.classList.remove('hidden');
   loginForm.reset();
 
   const profileSnap = await getDoc(doc(db, 'users', user.uid));
