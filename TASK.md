@@ -1,86 +1,57 @@
-# TASK — Iteration 3 continued (rev 3): Admin exclusivity, branding, UI cleanup, remaining verification
+# TASK — Offline persistence, script modularization, rules cleanup, admin greeting tweak
 
-**Target app version:** `docs/test/` → `0.3.0-t03`; `docs/` (root) → `0.1.1-t01`
-**Task drafted/updated:** 2026-09-17 (rev 3 — follow-up from the user's own hands-on testing of `0.3.0-t02`)
+**Target app version:** `docs/test/` → `0.3.1-t01`; `docs/` (root) → `0.3.1` once confirmed (no `-tNN` on root — see CLAUDE.md's updated versioning convention). **Treat this whole task as a patch, not a minor** — none of it is a new user-facing feature area, just robustness/structure/cleanup.
+**Task drafted/updated:** 2026-09-17
 
-Read `CLAUDE.md` first, then `SPEC.md`'s "Roles" section (revised today — new "Admin exclusivity" paragraph) before starting. This isn't a new iteration's data model — it's four small, independent follow-ups on the Iteration 3 work you already built and the user has now tested, plus finishing that iteration's original Step 5. Still no case/sample/action model (that stays a separate future task).
+Read `CLAUDE.md` first (note the updated "How this project is being run": you now only read `CLAUDE.md`/`SPEC.md`/`TASK.md` and only write to `HANDOFF.md` — nothing you log goes back into this file or into `SPEC.md` directly anymore). This task is five small, mostly-independent pieces that came out of a design-session architecture review, not a new data-model iteration — still no case/sample/action work here.
 
-## Step 1: Admin exclusivity in the admin screen (`docs/test/` only)
-- On the add-user form's role dropdown: remove `admin` as an option. Only `client` / `team_leader` / `worker` should ever be selectable there.
-- On the existing-user list's inline role editor: same — `admin` should never appear as a choice for any user, including when editing a non-admin's role.
-- The admin account's own row in that user list: render it without the role/verifier/status edit controls (read-only display of `admin` + whatever tag/status it has). There's exactly one admin, it isn't editable through this screen, and there's no second admin to promote — a comment noting why is enough, no need to over-engineer.
-- No Firestore rules change needed for this — rules are already admin-gated for any `users/*` write, so this is purely about not offering an option in the UI that shouldn't be picked. If you find a Firestore rules case where a non-admin *could* actually set `role: "admin"` on themselves or anyone if they crafted the write by hand, flag it — that would be a real gap worth closing, not just a UI nicety.
+## Step 1: Split the script into ES modules
+Both `docs/index.html` and `docs/test/index.html` (~560 lines each) are still single files with all their JS inline. Before this grows further, split the `<script type="module">` content into a few separate module files, loaded with plain `<script type="module" src="...">` — no bundler, no build step, this works natively in every current browser and deploys to GitHub Pages exactly as-is.
 
-## Step 2: Inline app logo + launched-icon recolor
-- Add the app's own `icon.svg` inline in the header, next to the "Smart Lab" title — `docs/index.html` uses `docs/icon.svg`, `docs/test/index.html` uses `docs/test/icon.svg`. Since `docs/test/` has no manifest anymore (removed in the Android-install-collision fix), this has to be a plain inline element (e.g. an `<img>` or inlined `<svg>`) referencing the file directly, not anything manifest-driven. Size it reasonably next to the title text — you have discretion on exact sizing/spacing.
-- Recolor `docs/icon.svg`'s accent (the flask outline + bubble dots, currently green `#4ac98f`) to orange — use `#e8590c`. This was picked specifically to stay visually distinct from `docs/test/icon.svg`'s existing amber (`#f5a623`), since the two builds' icons need to be tellable apart at a glance; flagged for the user to eyeball once built and say if they'd rather adjust the exact shade. Leave the dark background (`#141a1f`) and the flask/bubble geometry itself unchanged — only the accent color changes.
-- `docs/test/icon.svg` — leave completely as-is (amber, unchanged).
-- This touches `docs/` (launched), so bump it to `0.1.1-t01` per the versioning convention (a patch-level cosmetic fix to something already launched, tested under a `-tNN` suffix before dropping it). This is the first time `docs/` has changed since `0.1.0` — the login/data-model work from Iteration 3 stays entirely on `docs/test/`, untouched here.
+- You have discretion on the exact module boundaries — you know the actual code's dependencies better than this instruction does — but a reasonable starting split, based on the app's current shape: a small module holding the Firebase app/auth/Firestore instances (shared state everything else imports), a module for login/logout/change-password/the signed-in greeting, a module for the admin screen (user list, add-user, inline edit, reissue), and a module for the version-check banner.
+- Keep this to a pure refactor — no behavior change. If moving something reveals an actual bug or an awkward dependency, note it in `HANDOFF.md` rather than silently changing behavior to work around it.
+- Do this on `docs/test/` first as usual; only bring it to `docs/` once confirmed working.
 
-## Step 3: Remove the round-trip test UI, relocate Logout (`docs/test/` only)
-- Remove the leftover Firestore round-trip ping-test UI (the button/status display left over from the iteration-1 infra skeleton, writing/reading `test_ping/latest`). It's served its purpose and is just visual clutter now.
-- Move the Logout button to sit next to the username/role/verifier display that Iteration 3 already added (Step 3 of the original TASK.md) — wherever exactly makes sense given the current layout; you have discretion, just get it out of whatever less-natural spot it's currently in.
-- Root (`docs/`) is untouched by this step — it's still on the pre-roles fixed-formula login with no admin screen, so its own round-trip/logout layout is a separate call for whenever `docs/test/` eventually gets promoted to launched, not now.
+## Step 2: Enable Firestore offline persistence
+In whichever module now initializes Firestore, switch from the plain `getFirestore(app)` call to the persistent-cache form, e.g.:
 
-## Step 4: Finish Iteration 3's original Step 5 verification (still open from `0.3.0-t02`)
-This was flagged as not-yet-exercised when Iteration 3 was marked complete — finish it now, using the current admin screen (with Step 1's exclusivity changes already in place):
-- Add one account per type: a `client` (no verifier), a `team_leader`, and a `worker` — verifier tag on one of the latter two, not the other.
-- Confirm each logs in with the correct role/tag shown and no admin screen.
-- Pick one non-admin account and reissue its password. Confirm the old password stops working, the new one logs into the *same username*, and role/verifier/status are unchanged.
-- Confirm directly (e.g. via browser console) that a non-admin's read of another user's `users/{uid}` doc is genuinely denied by the rules, not just hidden by the UI.
+```js
+initializeFirestore(app, { localCache: persistentLocalCache({}) });
+```
+
+- Do this for both `docs/` and `docs/test/`'s Firestore instances (they're separate `initializeApp` calls today, so this is two call sites, not one).
+- No other code changes should be needed — reads, writes, and listeners keep working offline and sync automatically on reconnect. If you find that assumption wrong for anything in the current code (e.g. something that assumes a write always completes synchronously), flag it in `HANDOFF.md` rather than guessing at a fix.
+- Quick sanity check once built: load the app, go offline (dev tools network throttling is fine), confirm the signed-in screen still reads/behaves, then reconnect and confirm nothing got stuck.
+
+## Step 3: Remove the dead `ping`/`test_ping` Firestore rules
+Small, unrelated cleanup queued from the same review: the round-trip test UI that used `ping`/`test_ping` was already removed from both builds, but `setup/firestore.rules` still has open read/write match blocks for both collections. Delete those two match blocks. (The `ping/latest` and `test_ping/latest` documents themselves are harmless leftover data — feel free to delete them too via the Firebase Console if convenient, but that's not blocking.)
+
+## Step 4: Admin greeting — drop the redundant role
+The header greeting ("Hello **{username}** — {role}") is right for everyone except admin, where the username and role are effectively the same word (e.g. "Hello **admin** — admin" reads as redundant). For the signed-in admin account only, show just "Hello **{username}**" with no "— {role}" suffix; every other role keeps the full "Hello **{username}** — {role}" form unchanged.
+
+## Step 5: "What's new" changelog popup
+A plain-language changelog, distinct from `SPEC.md`'s Decisions Log (that's written for the design/build workflow, not for whoever actually uses the app) and from `HANDOFF.md` (your build notes back to the design session). This one's user-facing.
+
+- New small module (or data file) holding a short, ordered list of version entries — each just a version number, a date, and a **short, plain-language summary** of what changed, written so someone with no technical background understands it at a glance. A handful of short bullets per version at most (most versions should be 1-3), each one plain sentence, no jargon, no implementation detail, no code/file names, no internal reasoning — describe the effect the user would notice, not the mechanism (e.g. "The app now keeps working briefly if your connection drops" rather than "Enabled Firestore persistentLocalCache"; "Cleaned up the admin screen" rather than "Removed dead ping/test_ping rules"). Purely internal changes with no user-visible effect (this task's script modularization, for instance) get no entry at all — it's fine, even expected, for some versions to have nothing worth showing. Start the list fresh from this version (`0.3.1`) — no need to backfill entries for everything before it.
+- On load, compare the current version against a "last seen version" stored in `localStorage`. If the current version is newer, show a popup listing every entry newer than what was last seen, then update the stored value to the current version. If a version has no user-facing entries at all, it shouldn't trigger the popup on its own.
+- Make the existing version display (already shown near the top of the app) clickable — pressing it opens the same popup on demand, showing the recent entries regardless of what's been "seen." This works the same on `docs/` and `docs/test/`.
+- **Suppress the automatic popup on `docs/test/`'s `-tNN` builds specifically** — those are in-progress by nature, and popping up a changelog on every testing pass would get noisy. The version number stays clickable there too; it just doesn't self-trigger. Root (`docs/`) always auto-triggers, since it only ever gets plain versions now.
+- Going forward, add a changelog entry as a standing part of "when done" (alongside your `HANDOFF.md` note) for any future task that changes something a user would notice — same bar every time: short, plain-language, no jargon, describes the effect not the mechanism. Flag in your completion note that you've picked this up as a habit, not just for this one task.
 
 ## Where to build this
-`docs/test/` for Steps 1, 3, 4. `docs/` (root) for the icon-color half of Step 2 only — root gets no other changes.
+`docs/test/` for all five steps first, as usual. Promote to `docs/` only once confirmed — and per the updated versioning convention, `docs/` goes straight to a plain `0.3.1`, no `-tNN` on root even though this is its first change since `0.3.0`.
 
 ## Explicitly NOT in scope for this task
-- Any case/sample/action model work (separate future task).
-- Changing root's login flow, adding an admin screen to root, or touching root's round-trip/logout layout.
-- A true Auth-account delete, or any other item already marked out-of-scope in the original Iteration 3 TASK.md.
+- Any case/sample/action model work.
+- Introducing Alpine.js or any other reactive layer — that's a separate future call, once the case/sample/action CRUD UI actually needs it.
+- Rules unit tests / GitHub Actions rules deploy — a separate, larger piece if it happens at all.
 
 ## Definition of done
-- Admin screen's role dropdowns (add-user and edit-role) never show `admin` as an option; the admin's own row has no edit controls.
-- Both `docs/` and `docs/test/` show their own logo next to "Smart Lab" in the header; `docs/`'s icon accent is orange (`#e8590c`), `docs/test/`'s is unchanged amber.
-- `docs/test/`'s round-trip test UI is gone; Logout sits next to the username/role/verifier display.
-- All of original Step 5's verification (client/team_leader/worker creation, reissue, rules-enforcement check) confirmed working.
-
-## Versioning
-`docs/test/`: `0.3.0-t03`, bumping further if more passes are needed. `docs/`: `0.1.1-t01`, dropping the suffix once the user's confirmed the icon looks right.
+- `docs/test/index.html`'s script is split into separate module files with no behavior change; `docs/`'s isn't yet (until promoted).
+- Both builds' Firestore instances use `persistentLocalCache`; basic offline sanity check passes.
+- `setup/firestore.rules` no longer has `ping`/`test_ping` match blocks.
+- Admin's greeting reads "Hello **admin**" with no role suffix; every other role's greeting is unchanged.
+- Loading a version newer than what's stored in `localStorage` shows the "what's new" popup with everything since last seen (except on `docs/test/`'s `-tNN` builds); clicking the version number opens it on demand anywhere.
 
 ## When done
-- Add a short completion note below this line: what you built, any deviations, any questions or blockers (especially if you find a real rules gap in Step 1, or want to propose a different orange shade).
-- Log any real decisions as a dated entry in `SPEC.md`'s Decisions Log.
-
----
-
-*(Claude Code: add your completion note below this line.)*
-
-**Done — 2026-09-17.** `docs/test/` bumped to `0.3.0-t03`, `docs/` (root) bumped to `0.1.1-t01`.
-
-- **Step 1 (admin exclusivity):** removed `admin` from both the add-user role dropdown and the per-row inline role editor. The admin's own row in the user list now renders role/verifier/status as plain text with no edit controls (and its Reissue button is left available — not asked to remove it, and it's a legitimate action on any account including the admin's own). **Checked the rules gap you flagged: there isn't one.** `allow create, update: if isAdmin();` on `users/{uid}` requires the *caller* to already be admin unconditionally — there's no `|| request.auth.uid == uid` self-write exception, so a non-admin can't write to any `users/*` doc at all, including their own. Self-promotion was never possible; no rules change made.
-- **Step 2 (logo + recolor):** `docs/icon.svg`'s three accent colors changed from green `#4ac98f` to orange `#e8590c` (background/geometry untouched). `docs/test/icon.svg` left alone (amber, unchanged). Both `docs/index.html` and `docs/test/index.html` now show a 22×22px inline `<img>` of their own icon next to "smart-lab" in the header (plain `<img>`, not manifest-driven, since `docs/test/` has no manifest).
-- **Step 3 (cleanup):** removed the round-trip ping-test button/result box and its now-unused `serverTimestamp` import from `docs/test/index.html`. Logout now sits directly under the "Signed in as {username}" heading in the app-screen card (role/verifier stayed in the header badge next to the version, unchanged from Iteration 3).
-- **Step 4 (verification):** not run by me — this needs real credentials/manual judgment on the live admin screen (creating accounts, confirming role/tag display, reissuing a password, checking rules denial via browser console). Ready for you to run now that Steps 1–3 are deployed; happy to walk through it live if useful.
-
-No blockers. No deviations beyond what's noted above.
-
-**Update 2026-09-17 — further ad hoc follow-ups, in chat, beyond this TASK.md's text:**
-- Self-service "Change password" for any signed-in role (reauth + `updatePassword`), distinct from admin Reissue.
-- Verifier stripped from `docs/test/`'s UI/data model entirely — coming back later in a different shape.
-- Admin user list now defaults to Active users, with a sliding Active/Non-active toggle.
-- Removed the "Signed in as X / No case data yet" welcome card; Change password and Logout moved into the header top-right.
-- Header now shows a "Hello **{username}** — {role}" greeting instead of a plain role badge.
-
-**Task complete — 2026-09-17. Launched.** `docs/` (root) promoted to plain `0.3.0`, replacing the old iteration-1 fixed-formula login + ping round-trip with the full feature set above: `usernames`/`users` login, admin screen, reissue, self-service password change, orange branding. `docs/test/` stays at `0.3.0-t07`, now functionally identical to root (both share the same Firestore `users`/`usernames` docs and `setup/firestore.rules`, so the admin account bootstrapped earlier for testing already works on root too — no separate root bootstrap needed).
-
-Root's `docs/manifest.json`/`docs/sw.js` (install-to-home-screen) are untouched and still apply — only `index.html` changed. `docs/test/` keeps its non-installable, bookmark-only status from the earlier install-collision fix.
-
-**Update 2026-09-17 — post-launch fixes, root only:**
-- Reverted root's icon/accent from orange back to the original green (`#4ac98f`/`#2f7a58`) at the user's request.
-- Root's icon briefly still showed the old orange from a browser HTTP cache hit (GitHub Pages' 10-minute `Cache-Control`, not a real bug — the live file was already correct). Fixed properly: `icon.svg` is now referenced with a `?v=<APP_VERSION>` query string on both builds, so every future deploy is guaranteed a fresh icon fetch with no manual cache-clearing ever needed.
-- User confirmed the green looks right; `-t02` suffix dropped.
-
-**Handoff — 2026-09-17. Current live versions: root `0.3.1`, `docs/test/` `0.3.0-t08`.**
-
-Everything in this TASK.md (Iteration 3 continued rev 3, plus all the ad hoc chat follow-ups above, plus the launch) is done and live. Root is running the full `usernames`/`users` login + admin + reissue + self-service password change feature set, in its original green branding. `docs/test/` is functionally identical to root (same Firestore data), just not separately installable and carrying the amber "this is the test build" distinction. Only open item is Iteration 3's Step 5 verification (add client/team_leader/worker, reissue one, confirm rules deny cross-user reads) — still needs the user's own hands-on pass on the live admin screen. Next candidate work: the core case/sample/action data model (`SPEC.md` Phase plan item 4).
-
-*(Claude Code: add your completion note below this line.)*
+Log your completion note in `HANDOFF.md` — what you built, the exact module boundaries you chose, any deviation, and the current app version reached. Do not write to this file or to `SPEC.md`.
