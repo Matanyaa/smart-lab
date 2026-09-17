@@ -52,13 +52,13 @@
 
   #loginScreen.card{margin:auto;}
   #appScreen{max-width:420px; width:100%; margin:0 auto;}
+  #appScreen form{margin-top:14px;}
+
+  #adminScreen .list-filter{display:flex; gap:8px; margin-top:16px;}
 
   #adminScreen{max-width:560px; width:100%; margin:0 auto;}
   #adminScreen .add-row{display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end;}
   #adminScreen .add-row .field{flex:1; min-width:110px; margin-bottom:0;}
-  #adminScreen .checkbox-field{display:flex; align-items:center; gap:6px; padding-bottom:10px;}
-  #adminScreen .checkbox-field label{margin:0;}
-  #adminScreen .checkbox-field input{width:auto;}
 
   table.user-list{width:100%; border-collapse:collapse; margin-top:10px; font-size:13px;}
   table.user-list th, table.user-list td{padding:8px 6px; border-bottom:1px solid var(--border-soft); text-align:left; vertical-align:middle;}
@@ -105,6 +105,20 @@
   <div id="appScreen" class="card hidden">
     <h2>Signed in as <span id="whoami"></span></h2>
     <p class="muted">No case data yet.</p>
+    <button type="button" class="btn btn-small" id="showChangePasswordBtn">Change password</button>
+    <form id="changePasswordForm" class="hidden">
+      <div class="field">
+        <label for="currentPassword">Current password</label>
+        <input type="password" id="currentPassword" required>
+      </div>
+      <div class="field">
+        <label for="newOwnPassword">New password</label>
+        <input type="password" id="newOwnPassword" required>
+      </div>
+      <button type="submit" class="btn btn-primary btn-small">Update password</button>
+      <div class="error" id="changePasswordError"></div>
+      <p class="muted" id="changePasswordSuccess"></p>
+    </form>
   </div>
 
   <div id="adminScreen" class="card hidden">
@@ -130,17 +144,17 @@
             <option value="worker">Worker</option>
           </select>
         </div>
-        <div class="checkbox-field">
-          <input type="checkbox" id="newVerifier">
-          <label for="newVerifier">Verifier</label>
-        </div>
         <button type="submit" class="btn btn-primary" id="addUserBtn">Add user</button>
       </div>
       <div class="error" id="addUserError"></div>
     </form>
+    <div class="list-filter">
+      <button type="button" class="btn btn-small btn-primary" data-filter="active">Active</button>
+      <button type="button" class="btn btn-small" data-filter="disabled">Disabled</button>
+    </div>
     <table class="user-list">
       <thead>
-        <tr><th>Username</th><th>Role</th><th>Verifier</th><th>Status</th><th></th></tr>
+        <tr><th>Username</th><th>Role</th><th>Status</th><th></th></tr>
       </thead>
       <tbody id="userListBody"></tbody>
     </table>
@@ -151,13 +165,14 @@
 <script type="module">
 import { initializeApp, deleteApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
 import {
-  getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged
+  getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged,
+  updatePassword, reauthenticateWithCredential, EmailAuthProvider
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
 import {
   getFirestore, doc, getDoc, setDoc, updateDoc, collection, getDocs
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 
-const APP_VERSION = '0.3.0-t04';
+const APP_VERSION = '0.3.0-t05';
 document.getElementById('versionBadge').textContent = `v${APP_VERSION}`;
 
 // --- Firebase config ---
@@ -190,8 +205,37 @@ const loginError = document.getElementById('loginError');
 const whoami = document.getElementById('whoami');
 const roleBadge = document.getElementById('roleBadge');
 const logoutBtn = document.getElementById('logoutBtn');
+const showChangePasswordBtn = document.getElementById('showChangePasswordBtn');
+const changePasswordForm = document.getElementById('changePasswordForm');
+const changePasswordError = document.getElementById('changePasswordError');
+const changePasswordSuccess = document.getElementById('changePasswordSuccess');
 
-let currentProfile = null; // { uid, username, role, verifier, status }
+let currentProfile = null; // { uid, username, role, status }
+
+showChangePasswordBtn.addEventListener('click', () => {
+  changePasswordForm.classList.toggle('hidden');
+});
+
+// Self-service password change for the currently signed-in account.
+// Reauthenticates with the current password first -- Firebase requires a
+// recent sign-in for updatePassword, and this doubles as basic protection
+// against changing the password from an unlocked, unattended device.
+changePasswordForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  changePasswordError.textContent = '';
+  changePasswordSuccess.textContent = '';
+  const currentPassword = document.getElementById('currentPassword').value;
+  const newOwnPassword = document.getElementById('newOwnPassword').value;
+  try {
+    const cred = EmailAuthProvider.credential(auth.currentUser.email, currentPassword);
+    await reauthenticateWithCredential(auth.currentUser, cred);
+    await updatePassword(auth.currentUser, newOwnPassword);
+    changePasswordSuccess.textContent = 'Password updated.';
+    changePasswordForm.reset();
+  } catch (err) {
+    changePasswordError.textContent = `Couldn't update password: ${err.code || err.message}`;
+  }
+});
 
 // ---------------------------------------------------------------------
 // Login: username -> usernames/{username}.authEmail -> sign in with that
@@ -227,6 +271,10 @@ onAuthStateChanged(auth, async (user) => {
     roleBadge.classList.add('hidden');
     logoutBtn.classList.add('hidden');
     loginScreen.classList.remove('hidden');
+    changePasswordForm.classList.add('hidden');
+    changePasswordForm.reset();
+    changePasswordError.textContent = '';
+    changePasswordSuccess.textContent = '';
     currentProfile = null;
     return;
   }
@@ -248,7 +296,7 @@ onAuthStateChanged(auth, async (user) => {
   currentProfile = { uid: user.uid, ...profile };
 
   whoami.textContent = profile.username;
-  roleBadge.textContent = profile.role + (profile.verifier ? ' · Verifier' : '');
+  roleBadge.textContent = profile.role;
   roleBadge.classList.remove('hidden');
 
   if (profile.role === 'admin') {
@@ -260,24 +308,28 @@ onAuthStateChanged(auth, async (user) => {
 });
 
 // ---------------------------------------------------------------------
-// Admin: add user + edit role/verifier/status + reissue password.
+// Admin: add user + edit role/status + reissue password.
 // Convenience-only gating here (hide the screen) -- the actual protection
 // is the isAdmin() check in setup/firestore.rules.
+// Verifier is intentionally not modeled here -- stripped for now, coming
+// back later in a different shape.
 // ---------------------------------------------------------------------
 const addUserForm = document.getElementById('addUserForm');
 const addUserBtn = document.getElementById('addUserBtn');
 const addUserError = document.getElementById('addUserError');
 const newRoleSelect = document.getElementById('newRole');
-const newVerifierCheckbox = document.getElementById('newVerifier');
 const userListBody = document.getElementById('userListBody');
+const filterButtons = document.querySelectorAll('.list-filter button');
 
-newRoleSelect.addEventListener('change', () => {
-  if (newRoleSelect.value === 'client') {
-    newVerifierCheckbox.checked = false;
-    newVerifierCheckbox.disabled = true;
-  } else {
-    newVerifierCheckbox.disabled = false;
-  }
+let allUsers = [];
+let userListFilter = 'active';
+
+filterButtons.forEach((btn) => {
+  btn.addEventListener('click', () => {
+    userListFilter = btn.dataset.filter;
+    filterButtons.forEach((b) => b.classList.toggle('btn-primary', b === btn));
+    renderUserList();
+  });
 });
 
 // Creating a new Firebase Auth account signs that account in on whatever
@@ -303,17 +355,15 @@ addUserForm.addEventListener('submit', async (e) => {
   const username = document.getElementById('newUsername').value.trim();
   const password = document.getElementById('newPassword').value;
   const role = newRoleSelect.value;
-  const verifier = role !== 'client' && newVerifierCheckbox.checked;
   const authEmail = `${username}@${USERNAME_DOMAIN}`;
   try {
     const newUid = await createAuthAccountWithoutSigningOut(authEmail, password);
     // username is the stable identifier -- a future case/sample/action
     // model should reference people by username, never by uid, since the
     // uid behind a username can change via reissue (see Step 4).
-    await setDoc(doc(db, 'users', newUid), { username, role, verifier, status: 'active' });
+    await setDoc(doc(db, 'users', newUid), { username, role, status: 'active' });
     await setDoc(doc(db, 'usernames', username), { authEmail });
     addUserForm.reset();
-    newVerifierCheckbox.disabled = false;
     loadUserList();
   } catch (err) {
     addUserError.textContent = err.code === 'auth/email-already-in-use'
@@ -325,13 +375,24 @@ addUserForm.addEventListener('submit', async (e) => {
 });
 
 async function loadUserList() {
-  userListBody.innerHTML = '<tr><td colspan="5" class="muted">Loading…</td></tr>';
+  userListBody.innerHTML = '<tr><td colspan="4" class="muted">Loading…</td></tr>';
   const snap = await getDocs(collection(db, 'users'));
-  const rows = [];
-  snap.forEach((d) => rows.push({ uid: d.id, ...d.data() }));
-  rows.sort((a, b) => a.username.localeCompare(b.username));
+  allUsers = [];
+  snap.forEach((d) => allUsers.push({ uid: d.id, ...d.data() }));
+  allUsers.sort((a, b) => a.username.localeCompare(b.username));
+  renderUserList();
+}
 
+// Active users only by default -- the "Disabled" toggle swaps the view
+// rather than showing both at once, so a growing disabled list doesn't
+// clutter the common case.
+function renderUserList() {
+  const rows = allUsers.filter((u) => u.status === userListFilter);
   userListBody.innerHTML = '';
+  if (rows.length === 0) {
+    userListBody.innerHTML = `<tr><td colspan="4" class="muted">No ${userListFilter} users.</td></tr>`;
+    return;
+  }
   rows.forEach((u) => userListBody.appendChild(renderUserRow(u)));
 }
 
@@ -344,10 +405,9 @@ function renderUserRow(u) {
   // screen (no "admin" option ever appears in the role dropdown either,
   // above), and there's no second admin to promote -- so its own row is
   // read-only display rather than the usual edit controls.
-  let roleTd, verifierTd, statusTd;
+  let roleTd, statusTd;
   if (u.role === 'admin') {
     roleTd = document.createElement('td'); roleTd.textContent = u.role;
-    verifierTd = document.createElement('td'); verifierTd.textContent = u.verifier ? 'yes' : '';
     statusTd = document.createElement('td'); statusTd.textContent = u.status;
   } else {
     const roleSelect = document.createElement('select');
@@ -358,11 +418,6 @@ function renderUserRow(u) {
       if (r === u.role) opt.selected = true;
       roleSelect.appendChild(opt);
     });
-
-    const verifierCheckbox = document.createElement('input');
-    verifierCheckbox.type = 'checkbox';
-    verifierCheckbox.checked = !!u.verifier;
-    verifierCheckbox.disabled = u.role === 'client';
 
     const statusSelect = document.createElement('select');
     ['active', 'disabled'].forEach((s) => {
@@ -376,22 +431,13 @@ function renderUserRow(u) {
     async function saveField(field, value) {
       await updateDoc(doc(db, 'users', u.uid), { [field]: value });
     }
-    roleSelect.addEventListener('change', () => {
-      const role = roleSelect.value;
-      if (role === 'client') {
-        verifierCheckbox.checked = false;
-        verifierCheckbox.disabled = true;
-        saveField('verifier', false);
-      } else {
-        verifierCheckbox.disabled = false;
-      }
-      saveField('role', role);
+    roleSelect.addEventListener('change', () => saveField('role', roleSelect.value));
+    statusSelect.addEventListener('change', async () => {
+      await saveField('status', statusSelect.value);
+      loadUserList(); // changing status may move this row out of the current filter
     });
-    verifierCheckbox.addEventListener('change', () => saveField('verifier', verifierCheckbox.checked));
-    statusSelect.addEventListener('change', () => saveField('status', statusSelect.value));
 
     roleTd = document.createElement('td'); roleTd.appendChild(roleSelect);
-    verifierTd = document.createElement('td'); verifierTd.appendChild(verifierCheckbox);
     statusTd = document.createElement('td'); statusTd.appendChild(statusSelect);
   }
 
@@ -404,7 +450,6 @@ function renderUserRow(u) {
 
   tr.appendChild(usernameTd);
   tr.appendChild(roleTd);
-  tr.appendChild(verifierTd);
   tr.appendChild(statusTd);
   tr.appendChild(actionTd);
 
@@ -413,7 +458,7 @@ function renderUserRow(u) {
     const reissueTr = document.createElement('tr');
     reissueTr.className = 'reissue-row';
     const td = document.createElement('td');
-    td.colSpan = 5;
+    td.colSpan = 4;
     const input = document.createElement('input');
     input.type = 'password';
     input.placeholder = 'New password';
@@ -460,7 +505,7 @@ async function reissueUser(u, newPassword, errSpan, confirmBtn) {
     const disambiguatedEmail = `${u.username}.r${Date.now()}@${USERNAME_DOMAIN}`;
     const newUid = await createAuthAccountWithoutSigningOut(disambiguatedEmail, newPassword);
     await setDoc(doc(db, 'users', newUid), {
-      username: u.username, role: u.role, verifier: !!u.verifier, status: 'active'
+      username: u.username, role: u.role, status: 'active'
     });
     await updateDoc(doc(db, 'users', u.uid), { status: 'disabled' });
     await updateDoc(doc(db, 'usernames', u.username), { authEmail: disambiguatedEmail });
