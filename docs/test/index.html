@@ -41,7 +41,7 @@
   header h1{font-size:16px; margin:0; font-weight:700; display:flex; align-items:center; gap:8px;}
   header h1 img{width:22px; height:22px; display:block;}
   .badge{display:inline-block; padding:1px 8px; border-radius:10px; background:var(--panel2); border:1px solid var(--border); font-size:11px; color:var(--text-dim);}
-  #logoutBtn{margin-left:auto;}
+  #showChangePasswordBtn{margin-left:auto;}
 
   main{min-height:calc(100vh - 45px); display:flex; flex-direction:column; align-items:center; padding:24px; gap:20px;}
   .card{background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:32px 28px; max-width:360px; width:100%; margin:auto;}
@@ -51,10 +51,22 @@
   .muted{color:var(--text-dim); font-size:13px;}
 
   #loginScreen.card{margin:auto;}
-  #appScreen{max-width:420px; width:100%; margin:0 auto;}
-  #appScreen form{margin-top:14px;}
 
-  #adminScreen .list-filter{display:flex; gap:8px; margin-top:16px;}
+  #adminScreen .status-toggle{
+    position:relative; display:flex; width:220px; margin-top:16px;
+    background:var(--panel2); border:1px solid var(--border); border-radius:8px; padding:2px;
+  }
+  #adminScreen .status-toggle button{
+    flex:1; position:relative; z-index:1; background:transparent; border:none;
+    color:var(--text-dim); font:inherit; font-size:13px; padding:7px 0; cursor:pointer;
+    border-radius:6px; transition:color .2s ease;
+  }
+  #adminScreen .status-toggle button.active{color:var(--accent-text);}
+  #adminScreen .status-toggle .thumb{
+    position:absolute; top:2px; left:2px; width:calc(50% - 2px); height:calc(100% - 4px);
+    background:var(--accent); border-radius:6px; transition:transform .2s ease;
+  }
+  #adminScreen .status-toggle.is-disabled .thumb{transform:translateX(100%);}
 
   #adminScreen{max-width:560px; width:100%; margin:0 auto;}
   #adminScreen .add-row{display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end;}
@@ -81,6 +93,7 @@
   <h1><img src="icon.svg" alt="">smart-lab</h1>
   <span class="badge" id="versionBadge"></span>
   <span class="badge hidden" id="roleBadge"></span>
+  <button class="btn btn-small hidden" id="showChangePasswordBtn">Change password</button>
   <button class="btn btn-small hidden" id="logoutBtn">Log out</button>
 </header>
 
@@ -102,11 +115,9 @@
     </form>
   </div>
 
-  <div id="appScreen" class="card hidden">
-    <h2>Signed in as <span id="whoami"></span></h2>
-    <p class="muted">No case data yet.</p>
-    <button type="button" class="btn btn-small" id="showChangePasswordBtn">Change password</button>
-    <form id="changePasswordForm" class="hidden">
+  <div id="changePasswordScreen" class="card hidden">
+    <h2>Change password</h2>
+    <form id="changePasswordForm">
       <div class="field">
         <label for="currentPassword">Current password</label>
         <input type="password" id="currentPassword" required>
@@ -115,7 +126,7 @@
         <label for="newOwnPassword">New password</label>
         <input type="password" id="newOwnPassword" required>
       </div>
-      <button type="submit" class="btn btn-primary btn-small">Update password</button>
+      <button type="submit" class="btn btn-primary" style="width:100%;">Update password</button>
       <div class="error" id="changePasswordError"></div>
       <p class="muted" id="changePasswordSuccess"></p>
     </form>
@@ -148,9 +159,10 @@
       </div>
       <div class="error" id="addUserError"></div>
     </form>
-    <div class="list-filter">
-      <button type="button" class="btn btn-small btn-primary" data-filter="active">Active</button>
-      <button type="button" class="btn btn-small" data-filter="disabled">Disabled</button>
+    <div class="status-toggle" id="statusToggle">
+      <div class="thumb"></div>
+      <button type="button" class="active" data-filter="active">Active</button>
+      <button type="button" data-filter="disabled">Non-active</button>
     </div>
     <table class="user-list">
       <thead>
@@ -172,7 +184,7 @@ import {
   getFirestore, doc, getDoc, setDoc, updateDoc, collection, getDocs
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 
-const APP_VERSION = '0.3.0-t05';
+const APP_VERSION = '0.3.0-t06';
 document.getElementById('versionBadge').textContent = `v${APP_VERSION}`;
 
 // --- Firebase config ---
@@ -197,12 +209,11 @@ const db = getFirestore(app);
 const USERNAME_DOMAIN = 'smart-lab.internal';
 
 const loginScreen = document.getElementById('loginScreen');
-const appScreen = document.getElementById('appScreen');
+const changePasswordScreen = document.getElementById('changePasswordScreen');
 const adminScreen = document.getElementById('adminScreen');
 const loginForm = document.getElementById('loginForm');
 const loginBtn = document.getElementById('loginBtn');
 const loginError = document.getElementById('loginError');
-const whoami = document.getElementById('whoami');
 const roleBadge = document.getElementById('roleBadge');
 const logoutBtn = document.getElementById('logoutBtn');
 const showChangePasswordBtn = document.getElementById('showChangePasswordBtn');
@@ -213,7 +224,7 @@ const changePasswordSuccess = document.getElementById('changePasswordSuccess');
 let currentProfile = null; // { uid, username, role, status }
 
 showChangePasswordBtn.addEventListener('click', () => {
-  changePasswordForm.classList.toggle('hidden');
+  changePasswordScreen.classList.toggle('hidden');
 });
 
 // Self-service password change for the currently signed-in account.
@@ -266,12 +277,12 @@ logoutBtn.addEventListener('click', () => signOut(auth));
 
 onAuthStateChanged(auth, async (user) => {
   if (!user) {
-    appScreen.classList.add('hidden');
     adminScreen.classList.add('hidden');
     roleBadge.classList.add('hidden');
     logoutBtn.classList.add('hidden');
+    showChangePasswordBtn.classList.add('hidden');
     loginScreen.classList.remove('hidden');
-    changePasswordForm.classList.add('hidden');
+    changePasswordScreen.classList.add('hidden');
     changePasswordForm.reset();
     changePasswordError.textContent = '';
     changePasswordSuccess.textContent = '';
@@ -280,13 +291,12 @@ onAuthStateChanged(auth, async (user) => {
   }
 
   loginScreen.classList.add('hidden');
-  appScreen.classList.remove('hidden');
   logoutBtn.classList.remove('hidden');
+  showChangePasswordBtn.classList.remove('hidden');
   loginForm.reset();
 
   const profileSnap = await getDoc(doc(db, 'users', user.uid));
   if (!profileSnap.exists()) {
-    whoami.textContent = user.email;
     roleBadge.classList.add('hidden');
     adminScreen.classList.add('hidden');
     currentProfile = null;
@@ -295,7 +305,6 @@ onAuthStateChanged(auth, async (user) => {
   const profile = profileSnap.data();
   currentProfile = { uid: user.uid, ...profile };
 
-  whoami.textContent = profile.username;
   roleBadge.textContent = profile.role;
   roleBadge.classList.remove('hidden');
 
@@ -319,7 +328,8 @@ const addUserBtn = document.getElementById('addUserBtn');
 const addUserError = document.getElementById('addUserError');
 const newRoleSelect = document.getElementById('newRole');
 const userListBody = document.getElementById('userListBody');
-const filterButtons = document.querySelectorAll('.list-filter button');
+const statusToggle = document.getElementById('statusToggle');
+const filterButtons = statusToggle.querySelectorAll('button');
 
 let allUsers = [];
 let userListFilter = 'active';
@@ -327,7 +337,8 @@ let userListFilter = 'active';
 filterButtons.forEach((btn) => {
   btn.addEventListener('click', () => {
     userListFilter = btn.dataset.filter;
-    filterButtons.forEach((b) => b.classList.toggle('btn-primary', b === btn));
+    filterButtons.forEach((b) => b.classList.toggle('active', b === btn));
+    statusToggle.classList.toggle('is-disabled', userListFilter === 'disabled');
     renderUserList();
   });
 });
