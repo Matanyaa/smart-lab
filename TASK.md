@@ -63,4 +63,15 @@ This was flagged as not-yet-exercised when Iteration 3 was marked complete — f
 
 No blockers. No deviations beyond what's noted above.
 
+**Update 2026-09-17 — further ad hoc follow-ups, in chat, beyond this TASK.md's text:**
+- Self-service "Change password" for any signed-in role (reauth + `updatePassword`), distinct from admin Reissue.
+- Verifier stripped from `docs/test/`'s UI/data model entirely — coming back later in a different shape.
+- Admin user list now defaults to Active users, with a sliding Active/Non-active toggle.
+- Removed the "Signed in as X / No case data yet" welcome card; Change password and Logout moved into the header top-right.
+- Header now shows a "Hello **{username}** — {role}" greeting instead of a plain role badge.
+
+**Task complete — 2026-09-17. Launched.** `docs/` (root) promoted to plain `0.3.0`, replacing the old iteration-1 fixed-formula login + ping round-trip with the full feature set above: `usernames`/`users` login, admin screen, reissue, self-service password change, orange branding. `docs/test/` stays at `0.3.0-t07`, now functionally identical to root (both share the same Firestore `users`/`usernames` docs and `setup/firestore.rules`, so the admin account bootstrapped earlier for testing already works on root too — no separate root bootstrap needed).
+
+Root's `docs/manifest.json`/`docs/sw.js` (install-to-home-screen) are untouched and still apply — only `index.html` changed. `docs/test/` keeps its non-installable, bookmark-only status from the earlier install-collision fix.
+
 *(Claude Code: add your completion note below this line.)*
