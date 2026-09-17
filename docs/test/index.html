@@ -38,7 +38,8 @@
     display:flex; align-items:center; gap:10px; padding:10px 16px;
     border-bottom:1px solid var(--border-soft); background:var(--panel);
   }
-  header h1{font-size:16px; margin:0; font-weight:700;}
+  header h1{font-size:16px; margin:0; font-weight:700; display:flex; align-items:center; gap:8px;}
+  header h1 img{width:22px; height:22px; display:block;}
   .badge{display:inline-block; padding:1px 8px; border-radius:10px; background:var(--panel2); border:1px solid var(--border); font-size:11px; color:var(--text-dim);}
 
   main{min-height:calc(100vh - 45px); display:flex; flex-direction:column; align-items:center; padding:24px; gap:20px;}
@@ -51,11 +52,6 @@
   #loginScreen.card{margin:auto;}
   #appScreen{max-width:420px; width:100%; margin:0 auto;}
   #appScreen .row{display:flex; gap:10px; margin-top:16px;}
-  #pingResult{
-    margin-top:16px; background:var(--panel2); border:1px solid var(--border); border-radius:8px;
-    padding:10px 12px; font-size:13px; color:var(--text-dim); white-space:pre-wrap; word-break:break-word;
-    text-align:left; min-height:20px;
-  }
 
   #adminScreen{max-width:560px; width:100%; margin:0 auto;}
   #adminScreen .add-row{display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end;}
@@ -82,7 +78,7 @@
 </div>
 
 <header>
-  <h1>smart-lab</h1>
+  <h1><img src="icon.svg" alt="">smart-lab</h1>
   <span class="badge" id="versionBadge"></span>
   <span class="badge hidden" id="roleBadge"></span>
 </header>
@@ -107,12 +103,10 @@
 
   <div id="appScreen" class="card hidden">
     <h2>Signed in as <span id="whoami"></span></h2>
-    <p class="muted">This confirms auth + Firestore are wired up correctly. No case data yet.</p>
+    <p class="muted">No case data yet.</p>
     <div class="row">
-      <button class="btn" id="pingBtn">Test Firestore round-trip</button>
       <button class="btn" id="logoutBtn">Log out</button>
     </div>
-    <div id="pingResult"></div>
   </div>
 
   <div id="adminScreen" class="card hidden">
@@ -129,11 +123,13 @@
         </div>
         <div class="field">
           <label for="newRole">Role</label>
+          <!-- No "admin" option: there's exactly one admin (this account),
+               it's not editable through this screen, and there's no second
+               admin to promote. -->
           <select id="newRole">
             <option value="client">Client</option>
             <option value="team_leader">Team leader</option>
             <option value="worker">Worker</option>
-            <option value="admin">Admin</option>
           </select>
         </div>
         <div class="checkbox-field">
@@ -160,10 +156,10 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
 import {
-  getFirestore, doc, getDoc, setDoc, updateDoc, collection, getDocs, serverTimestamp
+  getFirestore, doc, getDoc, setDoc, updateDoc, collection, getDocs
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 
-const APP_VERSION = '0.3.0-t02';
+const APP_VERSION = '0.3.0-t03';
 document.getElementById('versionBadge').textContent = `v${APP_VERSION}`;
 
 // --- Firebase config ---
@@ -181,8 +177,8 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 // Spark (free) plan only allows the (default) database — no second named
-// database available. Data separation is a collection-name prefix instead
-// (test_ping vs ping) until/unless the project moves to Blaze.
+// database available, so this shares (default) with the launched build
+// rather than being isolated at the database level. See SPEC.md.
 const db = getFirestore(app);
 
 const USERNAME_DOMAIN = 'smart-lab.internal';
@@ -195,8 +191,6 @@ const loginBtn = document.getElementById('loginBtn');
 const loginError = document.getElementById('loginError');
 const whoami = document.getElementById('whoami');
 const roleBadge = document.getElementById('roleBadge');
-const pingBtn = document.getElementById('pingBtn');
-const pingResult = document.getElementById('pingResult');
 const logoutBtn = document.getElementById('logoutBtn');
 
 let currentProfile = null; // { uid, username, role, verifier, status }
@@ -228,27 +222,6 @@ loginForm.addEventListener('submit', async (e) => {
 
 logoutBtn.addEventListener('click', () => signOut(auth));
 
-pingBtn.addEventListener('click', async () => {
-  pingBtn.disabled = true;
-  pingResult.textContent = 'Writing...';
-  try {
-    const ref = doc(db, 'test_ping', 'latest');
-    await setDoc(ref, {
-      timestamp: serverTimestamp(),
-      by: auth.currentUser.email
-    });
-    pingResult.textContent = 'Reading back...';
-    const snap = await getDoc(ref);
-    pingResult.textContent = snap.exists()
-      ? `Round-trip OK:\n${JSON.stringify(snap.data(), null, 2)}`
-      : 'Wrote doc but read-back found nothing.';
-  } catch (err) {
-    pingResult.textContent = `Round-trip failed: ${err.message}`;
-  } finally {
-    pingBtn.disabled = false;
-  }
-});
-
 onAuthStateChanged(auth, async (user) => {
   if (!user) {
     appScreen.classList.add('hidden');
@@ -261,7 +234,6 @@ onAuthStateChanged(auth, async (user) => {
 
   loginScreen.classList.add('hidden');
   appScreen.classList.remove('hidden');
-  pingResult.textContent = '';
   loginForm.reset();
 
   const profileSnap = await getDoc(doc(db, 'users', user.uid));
@@ -365,52 +337,63 @@ async function loadUserList() {
 
 function renderUserRow(u) {
   const tr = document.createElement('tr');
-
-  const roleSelect = document.createElement('select');
-  ['client', 'team_leader', 'worker', 'admin'].forEach((r) => {
-    const opt = document.createElement('option');
-    opt.value = r;
-    opt.textContent = r;
-    if (r === u.role) opt.selected = true;
-    roleSelect.appendChild(opt);
-  });
-
-  const verifierCheckbox = document.createElement('input');
-  verifierCheckbox.type = 'checkbox';
-  verifierCheckbox.checked = !!u.verifier;
-  verifierCheckbox.disabled = u.role === 'client';
-
-  const statusSelect = document.createElement('select');
-  ['active', 'disabled'].forEach((s) => {
-    const opt = document.createElement('option');
-    opt.value = s;
-    opt.textContent = s;
-    if (s === u.status) opt.selected = true;
-    statusSelect.appendChild(opt);
-  });
-
-  async function saveField(field, value) {
-    await updateDoc(doc(db, 'users', u.uid), { [field]: value });
-  }
-  roleSelect.addEventListener('change', () => {
-    const role = roleSelect.value;
-    if (role === 'client') {
-      verifierCheckbox.checked = false;
-      verifierCheckbox.disabled = true;
-      saveField('verifier', false);
-    } else {
-      verifierCheckbox.disabled = false;
-    }
-    saveField('role', role);
-  });
-  verifierCheckbox.addEventListener('change', () => saveField('verifier', verifierCheckbox.checked));
-  statusSelect.addEventListener('change', () => saveField('status', statusSelect.value));
-
   const usernameTd = document.createElement('td');
   usernameTd.textContent = u.username;
-  const roleTd = document.createElement('td'); roleTd.appendChild(roleSelect);
-  const verifierTd = document.createElement('td'); verifierTd.appendChild(verifierCheckbox);
-  const statusTd = document.createElement('td'); statusTd.appendChild(statusSelect);
+
+  // There's exactly one admin account, it isn't editable through this
+  // screen (no "admin" option ever appears in the role dropdown either,
+  // above), and there's no second admin to promote -- so its own row is
+  // read-only display rather than the usual edit controls.
+  let roleTd, verifierTd, statusTd;
+  if (u.role === 'admin') {
+    roleTd = document.createElement('td'); roleTd.textContent = u.role;
+    verifierTd = document.createElement('td'); verifierTd.textContent = u.verifier ? 'yes' : '';
+    statusTd = document.createElement('td'); statusTd.textContent = u.status;
+  } else {
+    const roleSelect = document.createElement('select');
+    ['client', 'team_leader', 'worker'].forEach((r) => {
+      const opt = document.createElement('option');
+      opt.value = r;
+      opt.textContent = r;
+      if (r === u.role) opt.selected = true;
+      roleSelect.appendChild(opt);
+    });
+
+    const verifierCheckbox = document.createElement('input');
+    verifierCheckbox.type = 'checkbox';
+    verifierCheckbox.checked = !!u.verifier;
+    verifierCheckbox.disabled = u.role === 'client';
+
+    const statusSelect = document.createElement('select');
+    ['active', 'disabled'].forEach((s) => {
+      const opt = document.createElement('option');
+      opt.value = s;
+      opt.textContent = s;
+      if (s === u.status) opt.selected = true;
+      statusSelect.appendChild(opt);
+    });
+
+    async function saveField(field, value) {
+      await updateDoc(doc(db, 'users', u.uid), { [field]: value });
+    }
+    roleSelect.addEventListener('change', () => {
+      const role = roleSelect.value;
+      if (role === 'client') {
+        verifierCheckbox.checked = false;
+        verifierCheckbox.disabled = true;
+        saveField('verifier', false);
+      } else {
+        verifierCheckbox.disabled = false;
+      }
+      saveField('role', role);
+    });
+    verifierCheckbox.addEventListener('change', () => saveField('verifier', verifierCheckbox.checked));
+    statusSelect.addEventListener('change', () => saveField('status', statusSelect.value));
+
+    roleTd = document.createElement('td'); roleTd.appendChild(roleSelect);
+    verifierTd = document.createElement('td'); verifierTd.appendChild(verifierCheckbox);
+    statusTd = document.createElement('td'); statusTd.appendChild(statusSelect);
+  }
 
   const actionTd = document.createElement('td');
   const reissueBtn = document.createElement('button');

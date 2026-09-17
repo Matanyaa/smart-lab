@@ -1,92 +1,66 @@
-# TASK — Iteration 3: Login types & Admin (roles, verifier tag, password reissue)
+# TASK — Iteration 3 continued (rev 3): Admin exclusivity, branding, UI cleanup, remaining verification
 
-**Target app version:** `0.3.0-t01`
-**Task drafted/updated:** 2026-09-17 (rev 2 — username-stable identity model + reissue added after design discussion)
+**Target app version:** `docs/test/` → `0.3.0-t03`; `docs/` (root) → `0.1.1-t01`
+**Task drafted/updated:** 2026-09-17 (rev 3 — follow-up from the user's own hands-on testing of `0.3.0-t02`)
 
-Read `CLAUDE.md` first, then `SPEC.md`'s "Roles" and "Authentication" sections (both revised today). Key change from rev 1: login no longer resolves a username straight to `username@smart-lab.internal` by formula — it goes through a small lookup doc instead, specifically so an admin can later swap out *which* Firebase account backs a username (a "reissue") without disturbing anything that references that person elsewhere in the app. This task builds that plus the admin screen; still no case/sample/action model.
+Read `CLAUDE.md` first, then `SPEC.md`'s "Roles" section (revised today — new "Admin exclusivity" paragraph) before starting. This isn't a new iteration's data model — it's four small, independent follow-ups on the Iteration 3 work you already built and the user has now tested, plus finishing that iteration's original Step 5. Still no case/sample/action model (that stays a separate future task).
 
-## Step 1: Data model
-Two Firestore collections:
+## Step 1: Admin exclusivity in the admin screen (`docs/test/` only)
+- On the add-user form's role dropdown: remove `admin` as an option. Only `client` / `team_leader` / `worker` should ever be selectable there.
+- On the existing-user list's inline role editor: same — `admin` should never appear as a choice for any user, including when editing a non-admin's role.
+- The admin account's own row in that user list: render it without the role/verifier/status edit controls (read-only display of `admin` + whatever tag/status it has). There's exactly one admin, it isn't editable through this screen, and there's no second admin to promote — a comment noting why is enough, no need to over-engineer.
+- No Firestore rules change needed for this — rules are already admin-gated for any `users/*` write, so this is purely about not offering an option in the UI that shouldn't be picked. If you find a Firestore rules case where a non-admin *could* actually set `role: "admin"` on themselves or anyone if they crafted the write by hand, flag it — that would be a real gap worth closing, not just a UI nicety.
 
-- **`users/{uid}`** — one doc per Firebase Auth account. Fields: `username` (string), `role` (`"client" | "team_leader" | "worker" | "admin"`), `verifier` (boolean — must be `false`/absent when `role === "client"`), `status` (`"active" | "disabled"`, default `"active"`).
-  - **Important for later:** `username` here is the stable identifier — once the case/sample/action model exists (a future iteration), it should reference people *by username*, never by `uid`. A `uid` can be replaced (see Step 4, reissue); a username isn't expected to change. Leave a code comment on this collection saying so, for whoever builds that later.
-  - Disabled accounts are never deleted — they just sit there permanently inert, and that's fine (see SPEC's Authentication section on why delete isn't being built).
-- **`usernames/{username}`** — one doc per login username. Fields: `authEmail` (string — whichever synthetic email currently signs this username in). This is what makes reissue possible: the username stays fixed, but which email/Firebase-account it points to can change.
+## Step 2: Inline app logo + launched-icon recolor
+- Add the app's own `icon.svg` inline in the header, next to the "Smart Lab" title — `docs/index.html` uses `docs/icon.svg`, `docs/test/index.html` uses `docs/test/icon.svg`. Since `docs/test/` has no manifest anymore (removed in the Android-install-collision fix), this has to be a plain inline element (e.g. an `<img>` or inlined `<svg>`) referencing the file directly, not anything manifest-driven. Size it reasonably next to the title text — you have discretion on exact sizing/spacing.
+- Recolor `docs/icon.svg`'s accent (the flask outline + bubble dots, currently green `#4ac98f`) to orange — use `#e8590c`. This was picked specifically to stay visually distinct from `docs/test/icon.svg`'s existing amber (`#f5a623`), since the two builds' icons need to be tellable apart at a glance; flagged for the user to eyeball once built and say if they'd rather adjust the exact shade. Leave the dark background (`#141a1f`) and the flask/bubble geometry itself unchanged — only the accent color changes.
+- `docs/test/icon.svg` — leave completely as-is (amber, unchanged).
+- This touches `docs/` (launched), so bump it to `0.1.1-t01` per the versioning convention (a patch-level cosmetic fix to something already launched, tested under a `-tNN` suffix before dropping it). This is the first time `docs/` has changed since `0.1.0` — the login/data-model work from Iteration 3 stays entirely on `docs/test/`, untouched here.
 
-Security rules (`setup/firestore.rules`):
-- `usernames/{username}`: **public read** (needed before anyone's signed in, to resolve a typed username into an email to attempt sign-in with), admin-only write.
-- `users/{uid}`: a signed-in user can always read their own doc; only a caller whose own `users/{their uid}.role == "admin"` can read any `users/*` doc or write another user's doc. No client-side `delete`.
-- Don't over-engineer edge cases (e.g. an admin editing their own role) — a comment flagging it as a known gap is enough for this pass.
+## Step 3: Remove the round-trip test UI, relocate Logout (`docs/test/` only)
+- Remove the leftover Firestore round-trip ping-test UI (the button/status display left over from the iteration-1 infra skeleton, writing/reading `test_ping/latest`). It's served its purpose and is just visual clutter now.
+- Move the Logout button to sit next to the username/role/verifier display that Iteration 3 already added (Step 3 of the original TASK.md) — wherever exactly makes sense given the current layout; you have discretion, just get it out of whatever less-natural spot it's currently in.
+- Root (`docs/`) is untouched by this step — it's still on the pre-roles fixed-formula login with no admin screen, so its own round-trip/logout layout is a separate call for whenever `docs/test/` eventually gets promoted to launched, not now.
 
-**Login flow, updated:** username + password entered → read `usernames/{username}` → get `authEmail` → `signInWithEmailAndPassword(authEmail, password)` → on success, read `users/{resulting uid}` for role/verifier/status.
-
-**Manual bootstrap step, once, by the user (you can't do this from the app — no admin exists yet to grant the first one)**: after creating your own Firebase Auth account as before, manually create *both* `users/{your uid}` (`role: "admin"`, `status: "active"`) **and** `usernames/{your username}` (`authEmail: "<your synthetic email>"`) in the Firebase Console's Firestore data browser — both are needed for login to work under the new flow. Write clear step-by-step instructions for this into `setup/README.md`.
-
-## Step 2: Add-user (admin-only)
-- On login, look up the signed-in user's own `users/{uid}` doc. If `role !== "admin"`, don't render the admin screen at all (convenience only — the security rules above are the real protection).
-- Admin screen: a form (username, password, role dropdown, verifier checkbox — clear/disable it when role is `client`) to add a new user, plus a list of existing users (username/role/verifier/status) with inline editing of role, verifier, and status.
-- **Mechanism**: a second, temporary Firebase App instance (`initializeApp(firebaseConfig, "secondary")` with its own `getAuth()`) calls `createUserWithEmailAndPassword` with email `<username>@smart-lab.internal` on that secondary instance — creates the new Auth account without disturbing the admin's own session. Sign out and discard the secondary instance right after. Then, from the primary (still-admin) session, write `users/{newUid}` and `usernames/{username}`.
-- Editing an existing user's role/verifier/status is a plain Firestore update to their `users/{uid}` doc.
-
-## Step 3: Show role/tag after login
-- Somewhere visible after login (near the version banner is fine): show the logged-in username, their role, and "Verifier" if the tag is set. This is the main test surface for Steps 1–2.
-
-## Step 4: Reissue (admin-triggered password change for an existing user)
-This is how "change a user's password" actually gets built this iteration — not a true Admin-SDK reset (still needs Blaze, still deferred), but a Spark-compatible substitute that achieves the same practical outcome: the admin gives someone a new password.
-- On the admin screen's user list, a "Reissue" action per user, prompting for a new password.
-- Mechanism: same secondary-app-instance trick as Step 2 creates a **new** Firebase Auth account — needs a **different** internal email than the original, since the old account isn't being deleted (e.g. append a short disambiguator the user never sees, like `<username>.r2@smart-lab.internal`; exact scheme is your call, just make it obviously distinguishable in case you're ever looking at the Firebase Console directly).
-- Copy `username`, `role`, `verifier` from the old `users/{oldUid}` onto a new `users/{newUid}` doc (`status: "active"`). Set the old doc's `status` to `"disabled"`.
-- Update `usernames/{username}.authEmail` to the new account's email.
-- Result: the person logs in with the exact same username and the new password. Nothing else about them (role, verifier, and — once it exists — anything assigned to them by username) changes.
-- **Not building**: deleting a user's Auth account outright. Between "disable" (Step 1/2, already free) and "reissue" (this step), a real delete may never actually be needed — see SPEC's Authentication section. If it ever is, it stays a manual Firebase Console action, not an in-app one.
-
-## Step 5: Create test accounts and exercise all of it
-Using the admin screen:
-- Add one account per type: a `client` (no verifier), a `team_leader`, and a `worker` — put the verifier tag on one of the latter two, not the other.
-- Pick one non-admin account and **reissue** its password. Confirm: old password no longer works, new password logs in under the *same username*, and role/verifier/status are unchanged after the reissue.
-- (Your `admin` account is the one bootstrapped manually in Step 1.)
+## Step 4: Finish Iteration 3's original Step 5 verification (still open from `0.3.0-t02`)
+This was flagged as not-yet-exercised when Iteration 3 was marked complete — finish it now, using the current admin screen (with Step 1's exclusivity changes already in place):
+- Add one account per type: a `client` (no verifier), a `team_leader`, and a `worker` — verifier tag on one of the latter two, not the other.
+- Confirm each logs in with the correct role/tag shown and no admin screen.
+- Pick one non-admin account and reissue its password. Confirm the old password stops working, the new one logs into the *same username*, and role/verifier/status are unchanged.
+- Confirm directly (e.g. via browser console) that a non-admin's read of another user's `users/{uid}` doc is genuinely denied by the rules, not just hidden by the UI.
 
 ## Where to build this
-`docs/test/` — same convention as the last iteration. Bump `docs/test/index.html`'s `APP_VERSION` to `0.3.0-t01`.
+`docs/test/` for Steps 1, 3, 4. `docs/` (root) for the icon-color half of Step 2 only — root gets no other changes.
 
-## Explicitly NOT in scope for this iteration
-- Deleting a user's Auth account (see Step 4 — likely never needed at all; manual Console fallback if it ever is).
-- Any feature-level role *restriction* beyond hiding/showing the admin screen itself — no client-only or worker-only views of anything yet. That's Phase plan items 4–5, not this task.
-- Review-anonymity elevated admin access — unrelated open question.
+## Explicitly NOT in scope for this task
+- Any case/sample/action model work (separate future task).
+- Changing root's login flow, adding an admin screen to root, or touching root's round-trip/logout layout.
+- A true Auth-account delete, or any other item already marked out-of-scope in the original Iteration 3 TASK.md.
 
 ## Definition of done
-- Logged in as the bootstrapped admin: the admin screen is visible, and you can add a new user for each role/tag combination in Step 5 and see them appear in the list.
-- Logging in as each newly-created account shows the correct role/tag on screen and does **not** show the admin screen.
-- Reissuing one account's password works exactly as described in Step 5 — same username, new password, unchanged role/verifier/status.
-- The Firestore rules are actually enforcing this, not just the UI hiding buttons — e.g. a non-admin account's direct read of another user's `users/*` doc should genuinely fail.
+- Admin screen's role dropdowns (add-user and edit-role) never show `admin` as an option; the admin's own row has no edit controls.
+- Both `docs/` and `docs/test/` show their own logo next to "Smart Lab" in the header; `docs/`'s icon accent is orange (`#e8590c`), `docs/test/`'s is unchanged amber.
+- `docs/test/`'s round-trip test UI is gone; Logout sits next to the username/role/verifier display.
+- All of original Step 5's verification (client/team_leader/worker creation, reissue, rules-enforcement check) confirmed working.
 
 ## Versioning
-`docs/test/`: `0.3.0-t01`, bumping `-t02`, `-t03`... if more passes are needed. Root stays at plain `0.1.0` throughout — untouched by this task.
+`docs/test/`: `0.3.0-t03`, bumping further if more passes are needed. `docs/`: `0.1.1-t01`, dropping the suffix once the user's confirmed the icon looks right.
 
 ## When done
-- Add a short completion note below this line: what you built, any deviations, any questions or blockers.
-- Log any real decisions (exact rules syntax, the secondary-app-instance code pattern, the reissue email-disambiguation scheme you picked, anything about the admin-bootstrap step that wasn't obvious) as a dated entry in `SPEC.md`'s Decisions Log.
+- Add a short completion note below this line: what you built, any deviations, any questions or blockers (especially if you find a real rules gap in Step 1, or want to propose a different orange shade).
+- Log any real decisions as a dated entry in `SPEC.md`'s Decisions Log.
 
 ---
 
 *(Claude Code: add your completion note below this line.)*
 
-**Done — 2026-09-17.** Built in `docs/test/index.html`: `users/{uid}` + `usernames/{username}` model, admin-gated `setup/firestore.rules`, admin screen (add user, inline role/verifier/status editing), and reissue. `docs/test/index.html` bumped to `0.3.0-t01`.
+**Done — 2026-09-17.** `docs/test/` bumped to `0.3.0-t03`, `docs/` (root) bumped to `0.1.1-t01`.
 
-- Login flow now does the `usernames/{username}` → `authEmail` lookup before `signInWithEmailAndPassword`, per rev 2's spec.
-- Admin screen only renders when the signed-in user's own `users/{uid}.role === "admin"`; the real protection is in the rules, not this check.
-- Add-user and reissue both use a uniquely-named secondary Firebase app instance (`secondary-${Date.now()}`) to create the new Auth account without disturbing the admin's own session, then write Firestore from the primary session.
-- Reissue's disambiguated email: `${username}.r${Date.now()}@smart-lab.internal`.
-- Rewrote `setup/firestore.rules` rather than extending it — the prior blanket "any signed-in user" rule would have silently bypassed the new admin-only gates if left in place alongside them (Firestore rules are permissive-OR across matching blocks). Full reasoning and exact rules in `SPEC.md`'s Decisions Log.
-- Wrote the one-time admin-bootstrap steps into `setup/README.md` (UID-keyed `users` doc + username-keyed `usernames` doc, created by hand in the Console).
-- Root (`docs/index.html`) untouched, stays on the old fixed-formula login as scoped — still plain `0.1.0`.
+- **Step 1 (admin exclusivity):** removed `admin` from both the add-user role dropdown and the per-row inline role editor. The admin's own row in the user list now renders role/verifier/status as plain text with no edit controls (and its Reissue button is left available — not asked to remove it, and it's a legitimate action on any account including the admin's own). **Checked the rules gap you flagged: there isn't one.** `allow create, update: if isAdmin();` on `users/{uid}` requires the *caller* to already be admin unconditionally — there's no `|| request.auth.uid == uid` self-write exception, so a non-admin can't write to any `users/*` doc at all, including their own. Self-promotion was never possible; no rules change made.
+- **Step 2 (logo + recolor):** `docs/icon.svg`'s three accent colors changed from green `#4ac98f` to orange `#e8590c` (background/geometry untouched). `docs/test/icon.svg` left alone (amber, unchanged). Both `docs/index.html` and `docs/test/index.html` now show a 22×22px inline `<img>` of their own icon next to "smart-lab" in the header (plain `<img>`, not manifest-driven, since `docs/test/` has no manifest).
+- **Step 3 (cleanup):** removed the round-trip ping-test button/result box and its now-unused `serverTimestamp` import from `docs/test/index.html`. Logout now sits directly under the "Signed in as {username}" heading in the app-screen card (role/verifier stayed in the header badge next to the version, unchanged from Iteration 3).
+- **Step 4 (verification):** not run by me — this needs real credentials/manual judgment on the live admin screen (creating accounts, confirming role/tag display, reissuing a password, checking rules denial via browser console). Ready for you to run now that Steps 1–3 are deployed; happy to walk through it live if useful.
 
-**Deviation:** left `status: "disabled"` as a tracked/editable field with no enforcement yet (doesn't block login) — matches this task's own "no feature-level restriction beyond hiding the admin screen" scope note, flagged with a comment in the rules file rather than silently built further.
+No blockers. No deviations beyond what's noted above.
 
-**Verification needed from you (Step 5):** bootstrap your admin account per `setup/README.md`'s new section, then from the admin screen add a `client`, `team_leader`, and `worker` (verifier tag on one of the latter two), confirm each logs in with the correct role/tag shown and no admin screen, then reissue one non-admin account's password and confirm the old password stops working while the new one logs into the same username with role/verifier/status unchanged. Also worth a direct check that a non-admin's browser console can't read another user's `users/{uid}` doc (rules should reject it, not just the UI hiding it).
-
-**Update 2026-09-17 — admin bootstrap debugged, confirmed working.** First bootstrap attempt failed login with `no-such-username`. Root cause: Firestore Console's "Add document" screen defaults the Document ID field to auto-generated ("Auto-ID"), and it's easy to save without noticing you need to click it and type a custom ID instead — the `usernames` doc existed, just not at the exact path `usernames/admin` the code was reading. Bumped to `0.3.0-t02` along the way to surface the actual error code/message on screen and in the console instead of a generic message, which is what made this diagnosable — worth keeping that more-specific error display rather than reverting to the vaguer original wording. `setup/README.md`'s bootstrap steps rewritten to call out the Auto-ID trap explicitly. Confirmed: admin login now works end-to-end (lookup → sign-in → role read → admin screen renders).
-
-**Still open, not yet exercised:** the rest of Step 5 — adding a client/team_leader/worker account, reissuing one, and the direct non-admin-can't-read-another's-doc rules check — hasn't been run yet. Current live version: `docs/test/` at `0.3.0-t02`, root unchanged at `0.1.0`.
-
-**Task complete — 2026-09-17, pending user's own review pass.** User has additional feedback for the design session beyond what's captured here — to be raised directly rather than guessed at in this note.
+*(Claude Code: add your completion note below this line.)*
