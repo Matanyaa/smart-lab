@@ -74,4 +74,13 @@ No blockers. No deviations beyond what's noted above.
 
 Root's `docs/manifest.json`/`docs/sw.js` (install-to-home-screen) are untouched and still apply — only `index.html` changed. `docs/test/` keeps its non-installable, bookmark-only status from the earlier install-collision fix.
 
+**Update 2026-09-17 — post-launch fixes, root only:**
+- Reverted root's icon/accent from orange back to the original green (`#4ac98f`/`#2f7a58`) at the user's request.
+- Root's icon briefly still showed the old orange from a browser HTTP cache hit (GitHub Pages' 10-minute `Cache-Control`, not a real bug — the live file was already correct). Fixed properly: `icon.svg` is now referenced with a `?v=<APP_VERSION>` query string on both builds, so every future deploy is guaranteed a fresh icon fetch with no manual cache-clearing ever needed.
+- User confirmed the green looks right; `-t02` suffix dropped.
+
+**Handoff — 2026-09-17. Current live versions: root `0.3.1`, `docs/test/` `0.3.0-t08`.**
+
+Everything in this TASK.md (Iteration 3 continued rev 3, plus all the ad hoc chat follow-ups above, plus the launch) is done and live. Root is running the full `usernames`/`users` login + admin + reissue + self-service password change feature set, in its original green branding. `docs/test/` is functionally identical to root (same Firestore data), just not separately installable and carrying the amber "this is the test build" distinction. Only open item is Iteration 3's Step 5 verification (add client/team_leader/worker, reissue one, confirm rules deny cross-user reads) — still needs the user's own hands-on pass on the live admin screen. Next candidate work: the core case/sample/action data model (`SPEC.md` Phase plan item 4).
+
 *(Claude Code: add your completion note below this line.)*
