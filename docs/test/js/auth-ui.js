@@ -5,6 +5,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
 import { doc, getDoc } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 import { loadUserList } from './admin-ui.js';
+import { showCasesScreen, hideCasesScreen } from './cases.js';
 
 const loginScreen = document.getElementById('loginScreen');
 const changePasswordScreen = document.getElementById('changePasswordScreen');
@@ -98,6 +99,7 @@ onAuthStateChanged(auth, async (user) => {
     changePasswordForm.reset();
     changePasswordError.textContent = '';
     changePasswordSuccess.textContent = '';
+    hideCasesScreen();
     currentProfile = null;
     return;
   }
@@ -111,6 +113,7 @@ onAuthStateChanged(auth, async (user) => {
   if (!profileSnap.exists()) {
     greeting.classList.add('hidden');
     adminScreen.classList.add('hidden');
+    hideCasesScreen();
     currentProfile = null;
     return;
   }
@@ -125,5 +128,13 @@ onAuthStateChanged(auth, async (user) => {
     loadUserList();
   } else {
     adminScreen.classList.add('hidden');
+  }
+
+  // Cases screen is internal to the lab team -- clients have no view
+  // built yet (Phase plan item 5), so they're excluded here too.
+  if (['admin', 'team_leader', 'worker'].includes(profile.role)) {
+    showCasesScreen(currentProfile);
+  } else {
+    hideCasesScreen();
   }
 });

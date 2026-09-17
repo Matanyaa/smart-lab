@@ -6,9 +6,25 @@ service cloud.firestore {
     function isSignedIn() {
       return request.auth != null;
     }
+    function myProfile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+    function myRole() {
+      return isSignedIn() ? myProfile().role : null;
+    }
+    function myUsername() {
+      return myProfile().username;
+    }
     function isAdmin() {
-      return isSignedIn() &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+      return myRole() == 'admin';
+    }
+    // Case work is internal to the lab team -- clients have no view built
+    // yet (Phase plan item 5), so they're excluded from all of it for now.
+    function isStaff() {
+      return myRole() in ['admin', 'team_leader', 'worker'];
+    }
+    function isLeadOrAdmin() {
+      return myRole() in ['admin', 'team_leader'];
     }
 
     // Must be readable while signed out, to resolve a typed username into
@@ -19,9 +35,40 @@ service cloud.firestore {
     }
 
     match /users/{uid} {
-      allow read: if isSignedIn() && (request.auth.uid == uid || isAdmin());
+      // Widened from admin-or-self (2026-09-18): picking a case manager
+      // needs a list of team_leader/worker usernames, which means any
+      // staff member needs to read the whole users collection, not just
+      // their own doc. Usernames/roles aren't sensitive within the team.
+      allow read: if isSignedIn() && (request.auth.uid == uid || isStaff());
       allow create, update: if isAdmin();
       allow delete: if false;
+    }
+
+    match /cases/{caseId} {
+      allow read: if isStaff();
+      allow create: if isLeadOrAdmin();
+      // Broader than create: a case's own caseManager (a worker or
+      // team_leader named on the case, not necessarily who created it)
+      // needs to update it day-to-day too.
+      allow update: if isSignedIn() && (isLeadOrAdmin() || resource.data.caseManager == myUsername());
+      // Deliberately NOT admin -- matches SPEC's "team leader signs off
+      // final archiving" and TASK's explicit exclusion of admin from
+      // "Approve & delete", since this is real, permanent, cascading
+      // deletion. The one place in this whole feature that's a hard
+      // rule rather than a UI-only restriction.
+      allow delete: if isSignedIn() && myRole() == 'team_leader';
+
+      match /samples/{sampleId} {
+        allow read: if isStaff();
+        allow create, update: if isStaff();
+        allow delete: if isSignedIn() && myRole() == 'team_leader';
+
+        match /actions/{actionId} {
+          allow read: if isStaff();
+          allow create, update: if isStaff();
+          allow delete: if isSignedIn() && myRole() == 'team_leader';
+        }
+      }
     }
   }
 }

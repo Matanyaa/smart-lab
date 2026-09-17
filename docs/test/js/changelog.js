@@ -13,6 +13,13 @@ const CHANGELOG = [
       'The app now keeps working briefly if your connection drops, and catches up automatically once it’s back.',
       'Tidied up the admin screen.'
     ]
+  },
+  {
+    version: '0.4.0',
+    date: '2026-09-18',
+    notes: [
+      'New: track cases, their samples, and the tests run on each one, from creation through to archiving.'
+    ]
   }
 ];
 
