@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Smart Lab (Test)</title>
-<link rel="icon" type="image/svg+xml" href="icon.svg?v=0.3.0-t08">
+<link rel="icon" type="image/svg+xml" href="icon.svg?v=0.3.1-t01">
 <meta name="theme-color" content="#141a1f">
 <style>
   :root{
@@ -81,6 +81,16 @@
 
   #updateBanner{display:none; align-items:center; gap:10px; padding:8px 14px; background:var(--warn); color:#25200a; font-size:13px;}
   #updateBanner button{border:1px solid #25200a55; background:transparent; color:#25200a; border-radius:6px; padding:4px 10px; font:inherit; cursor:pointer;}
+
+  #versionBadge{cursor:pointer;}
+  .modal-overlay{position:fixed; inset:0; background:rgba(0,0,0,0.55); display:flex; align-items:center; justify-content:center; padding:24px; z-index:100;}
+  #changelogCard{max-width:380px; max-height:80vh; overflow-y:auto;}
+  .changelog-entry{margin-bottom:16px;}
+  .changelog-entry:last-child{margin-bottom:0;}
+  .changelog-version{font-weight:700;}
+  .changelog-date{color:var(--text-dim); font-weight:400; font-size:12px; margin-left:8px;}
+  #changelogList ul{margin:6px 0 0; padding-left:18px;}
+  #changelogList li{margin-bottom:4px; font-size:14px;}
 </style>
 </head>
 <body>
@@ -92,7 +102,7 @@
 </div>
 
 <header>
-  <h1><img src="icon.svg?v=0.3.0-t08" alt="">smart-lab</h1>
+  <h1><img src="icon.svg?v=0.3.1-t01" alt="">smart-lab</h1>
   <span class="badge" id="versionBadge"></span>
   <span class="greeting hidden" id="greeting"></span>
   <button class="btn btn-small hidden" id="showChangePasswordBtn">Change password</button>
@@ -176,385 +186,17 @@
 
 </main>
 
-<script type="module">
-import { initializeApp, deleteApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
-import {
-  getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged,
-  updatePassword, reauthenticateWithCredential, EmailAuthProvider
-} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
-import {
-  getFirestore, doc, getDoc, setDoc, updateDoc, collection, getDocs
-} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+<div id="changelogOverlay" class="modal-overlay hidden">
+  <div class="card" id="changelogCard">
+    <h2>What's new</h2>
+    <div id="changelogList"></div>
+    <button type="button" class="btn btn-primary" id="changelogCloseBtn" style="width:100%; margin-top:16px;">Close</button>
+  </div>
+</div>
 
-// NOTE: icon.svg is referenced with a ?v=<version> query string in the
-// <link rel="icon"> above and the header <img> below, to bust the
-// browser's HTTP cache on every deploy. Bump those alongside this
-// constant on every version change.
-const APP_VERSION = '0.3.0-t08';
-document.getElementById('versionBadge').textContent = `v${APP_VERSION}`;
-
-// --- Firebase config ---
-// Safe to keep client-side: Firebase web app config is not a secret key,
-// it's an identifier — access is enforced by Firestore/Auth rules instead.
-const firebaseConfig = {
-  apiKey: "AIzaSyDYCpHcQ640_QXXa9YOVPlh-JdYbXJD40I",
-  authDomain: "smart-lab-abd80.firebaseapp.com",
-  projectId: "smart-lab-abd80",
-  storageBucket: "smart-lab-abd80.firebasestorage.app",
-  messagingSenderId: "82399096157",
-  appId: "1:82399096157:web:e99b37e6efa3654f5c8cb4"
-};
-
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-// Spark (free) plan only allows the (default) database — no second named
-// database available, so this shares (default) with the launched build
-// rather than being isolated at the database level. See SPEC.md.
-const db = getFirestore(app);
-
-const USERNAME_DOMAIN = 'smart-lab.internal';
-
-const loginScreen = document.getElementById('loginScreen');
-const changePasswordScreen = document.getElementById('changePasswordScreen');
-const adminScreen = document.getElementById('adminScreen');
-const loginForm = document.getElementById('loginForm');
-const loginBtn = document.getElementById('loginBtn');
-const loginError = document.getElementById('loginError');
-const greeting = document.getElementById('greeting');
-const logoutBtn = document.getElementById('logoutBtn');
-const showChangePasswordBtn = document.getElementById('showChangePasswordBtn');
-const changePasswordForm = document.getElementById('changePasswordForm');
-const changePasswordError = document.getElementById('changePasswordError');
-const changePasswordSuccess = document.getElementById('changePasswordSuccess');
-
-let currentProfile = null; // { uid, username, role, status }
-
-showChangePasswordBtn.addEventListener('click', () => {
-  changePasswordScreen.classList.toggle('hidden');
-});
-
-// Self-service password change for the currently signed-in account.
-// Reauthenticates with the current password first -- Firebase requires a
-// recent sign-in for updatePassword, and this doubles as basic protection
-// against changing the password from an unlocked, unattended device.
-changePasswordForm.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  changePasswordError.textContent = '';
-  changePasswordSuccess.textContent = '';
-  const currentPassword = document.getElementById('currentPassword').value;
-  const newOwnPassword = document.getElementById('newOwnPassword').value;
-  try {
-    const cred = EmailAuthProvider.credential(auth.currentUser.email, currentPassword);
-    await reauthenticateWithCredential(auth.currentUser, cred);
-    await updatePassword(auth.currentUser, newOwnPassword);
-    changePasswordSuccess.textContent = 'Password updated.';
-    changePasswordForm.reset();
-  } catch (err) {
-    changePasswordError.textContent = `Couldn't update password: ${err.code || err.message}`;
-  }
-});
-
-// ---------------------------------------------------------------------
-// Login: username -> usernames/{username}.authEmail -> sign in with that
-// email. The username is the stable identifier everything else should
-// eventually reference (see users/{uid} doc note below) — the uid behind
-// it can be swapped out later via reissue without anything else changing.
-// ---------------------------------------------------------------------
-loginForm.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  loginError.textContent = '';
-  loginBtn.disabled = true;
-  const username = document.getElementById('username').value.trim();
-  const password = document.getElementById('password').value;
-  try {
-    const usernameSnap = await getDoc(doc(db, 'usernames', username));
-    if (!usernameSnap.exists()) throw new Error('no-such-username');
-    const { authEmail } = usernameSnap.data();
-    await signInWithEmailAndPassword(auth, authEmail, password);
-  } catch (err) {
-    console.error('Login failed:', err);
-    loginError.textContent = `Login failed: check username and password. (${err.code || err.message})`;
-  } finally {
-    loginBtn.disabled = false;
-  }
-});
-
-logoutBtn.addEventListener('click', () => signOut(auth));
-
-onAuthStateChanged(auth, async (user) => {
-  if (!user) {
-    adminScreen.classList.add('hidden');
-    greeting.classList.add('hidden');
-    logoutBtn.classList.add('hidden');
-    showChangePasswordBtn.classList.add('hidden');
-    loginScreen.classList.remove('hidden');
-    changePasswordScreen.classList.add('hidden');
-    changePasswordForm.reset();
-    changePasswordError.textContent = '';
-    changePasswordSuccess.textContent = '';
-    currentProfile = null;
-    return;
-  }
-
-  loginScreen.classList.add('hidden');
-  logoutBtn.classList.remove('hidden');
-  showChangePasswordBtn.classList.remove('hidden');
-  loginForm.reset();
-
-  const profileSnap = await getDoc(doc(db, 'users', user.uid));
-  if (!profileSnap.exists()) {
-    greeting.classList.add('hidden');
-    adminScreen.classList.add('hidden');
-    currentProfile = null;
-    return;
-  }
-  const profile = profileSnap.data();
-  currentProfile = { uid: user.uid, ...profile };
-
-  greeting.textContent = '';
-  const nameEl = document.createElement('strong');
-  nameEl.textContent = profile.username;
-  greeting.append('Hello ', nameEl, ` — ${profile.role}`);
-  greeting.classList.remove('hidden');
-
-  if (profile.role === 'admin') {
-    adminScreen.classList.remove('hidden');
-    loadUserList();
-  } else {
-    adminScreen.classList.add('hidden');
-  }
-});
-
-// ---------------------------------------------------------------------
-// Admin: add user + edit role/status + reissue password.
-// Convenience-only gating here (hide the screen) -- the actual protection
-// is the isAdmin() check in setup/firestore.rules.
-// Verifier is intentionally not modeled here -- stripped for now, coming
-// back later in a different shape.
-// ---------------------------------------------------------------------
-const addUserForm = document.getElementById('addUserForm');
-const addUserBtn = document.getElementById('addUserBtn');
-const addUserError = document.getElementById('addUserError');
-const newRoleSelect = document.getElementById('newRole');
-const userListBody = document.getElementById('userListBody');
-const statusToggle = document.getElementById('statusToggle');
-const filterButtons = statusToggle.querySelectorAll('button');
-
-let allUsers = [];
-let userListFilter = 'active';
-
-filterButtons.forEach((btn) => {
-  btn.addEventListener('click', () => {
-    userListFilter = btn.dataset.filter;
-    filterButtons.forEach((b) => b.classList.toggle('active', b === btn));
-    statusToggle.classList.toggle('is-disabled', userListFilter === 'disabled');
-    renderUserList();
-  });
-});
-
-// Creating a new Firebase Auth account signs that account in on whatever
-// auth instance made the call -- so it's done on a throwaway secondary
-// app instance instead of the primary one, to avoid signing the admin
-// out of their own session.
-async function createAuthAccountWithoutSigningOut(email, password) {
-  const secondaryApp = initializeApp(firebaseConfig, `secondary-${Date.now()}`);
-  const secondaryAuth = getAuth(secondaryApp);
-  try {
-    const cred = await createUserWithEmailAndPassword(secondaryAuth, email, password);
-    return cred.user.uid;
-  } finally {
-    await signOut(secondaryAuth).catch(() => {});
-    await deleteApp(secondaryApp).catch(() => {});
-  }
-}
-
-addUserForm.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  addUserError.textContent = '';
-  addUserBtn.disabled = true;
-  const username = document.getElementById('newUsername').value.trim();
-  const password = document.getElementById('newPassword').value;
-  const role = newRoleSelect.value;
-  const authEmail = `${username}@${USERNAME_DOMAIN}`;
-  try {
-    const newUid = await createAuthAccountWithoutSigningOut(authEmail, password);
-    // username is the stable identifier -- a future case/sample/action
-    // model should reference people by username, never by uid, since the
-    // uid behind a username can change via reissue (see Step 4).
-    await setDoc(doc(db, 'users', newUid), { username, role, status: 'active' });
-    await setDoc(doc(db, 'usernames', username), { authEmail });
-    addUserForm.reset();
-    loadUserList();
-  } catch (err) {
-    addUserError.textContent = err.code === 'auth/email-already-in-use'
-      ? 'That username is already taken.'
-      : `Couldn't add user: ${err.message}`;
-  } finally {
-    addUserBtn.disabled = false;
-  }
-});
-
-async function loadUserList() {
-  userListBody.innerHTML = '<tr><td colspan="4" class="muted">Loading…</td></tr>';
-  const snap = await getDocs(collection(db, 'users'));
-  allUsers = [];
-  snap.forEach((d) => allUsers.push({ uid: d.id, ...d.data() }));
-  allUsers.sort((a, b) => a.username.localeCompare(b.username));
-  renderUserList();
-}
-
-// Active users only by default -- the "Disabled" toggle swaps the view
-// rather than showing both at once, so a growing disabled list doesn't
-// clutter the common case.
-function renderUserList() {
-  const rows = allUsers.filter((u) => u.status === userListFilter);
-  userListBody.innerHTML = '';
-  if (rows.length === 0) {
-    userListBody.innerHTML = `<tr><td colspan="4" class="muted">No ${userListFilter} users.</td></tr>`;
-    return;
-  }
-  rows.forEach((u) => userListBody.appendChild(renderUserRow(u)));
-}
-
-function renderUserRow(u) {
-  const tr = document.createElement('tr');
-  const usernameTd = document.createElement('td');
-  usernameTd.textContent = u.username;
-
-  // There's exactly one admin account, it isn't editable through this
-  // screen (no "admin" option ever appears in the role dropdown either,
-  // above), and there's no second admin to promote -- so its own row is
-  // read-only display rather than the usual edit controls.
-  let roleTd, statusTd;
-  if (u.role === 'admin') {
-    roleTd = document.createElement('td'); roleTd.textContent = u.role;
-    statusTd = document.createElement('td'); statusTd.textContent = u.status;
-  } else {
-    const roleSelect = document.createElement('select');
-    ['client', 'team_leader', 'worker'].forEach((r) => {
-      const opt = document.createElement('option');
-      opt.value = r;
-      opt.textContent = r;
-      if (r === u.role) opt.selected = true;
-      roleSelect.appendChild(opt);
-    });
-
-    const statusSelect = document.createElement('select');
-    ['active', 'disabled'].forEach((s) => {
-      const opt = document.createElement('option');
-      opt.value = s;
-      opt.textContent = s;
-      if (s === u.status) opt.selected = true;
-      statusSelect.appendChild(opt);
-    });
-
-    async function saveField(field, value) {
-      await updateDoc(doc(db, 'users', u.uid), { [field]: value });
-    }
-    roleSelect.addEventListener('change', () => saveField('role', roleSelect.value));
-    statusSelect.addEventListener('change', async () => {
-      await saveField('status', statusSelect.value);
-      loadUserList(); // changing status may move this row out of the current filter
-    });
-
-    roleTd = document.createElement('td'); roleTd.appendChild(roleSelect);
-    statusTd = document.createElement('td'); statusTd.appendChild(statusSelect);
-  }
-
-  const actionTd = document.createElement('td');
-  const reissueBtn = document.createElement('button');
-  reissueBtn.type = 'button';
-  reissueBtn.className = 'btn btn-small';
-  reissueBtn.textContent = 'Reissue';
-  actionTd.appendChild(reissueBtn);
-
-  tr.appendChild(usernameTd);
-  tr.appendChild(roleTd);
-  tr.appendChild(statusTd);
-  tr.appendChild(actionTd);
-
-  reissueBtn.addEventListener('click', () => {
-    if (tr.querySelector('.reissue-row')) return; // already open
-    const reissueTr = document.createElement('tr');
-    reissueTr.className = 'reissue-row';
-    const td = document.createElement('td');
-    td.colSpan = 4;
-    const input = document.createElement('input');
-    input.type = 'password';
-    input.placeholder = 'New password';
-    const confirmBtn = document.createElement('button');
-    confirmBtn.type = 'button';
-    confirmBtn.className = 'btn btn-small btn-primary';
-    confirmBtn.textContent = 'Confirm';
-    confirmBtn.style.marginLeft = '8px';
-    const cancelBtn = document.createElement('button');
-    cancelBtn.type = 'button';
-    cancelBtn.className = 'btn btn-small';
-    cancelBtn.textContent = 'Cancel';
-    cancelBtn.style.marginLeft = '8px';
-    const errSpan = document.createElement('span');
-    errSpan.className = 'error';
-    errSpan.style.marginLeft = '8px';
-
-    cancelBtn.addEventListener('click', () => reissueTr.remove());
-    confirmBtn.addEventListener('click', () => reissueUser(u, input.value, errSpan, confirmBtn));
-
-    td.appendChild(input);
-    td.appendChild(confirmBtn);
-    td.appendChild(cancelBtn);
-    td.appendChild(errSpan);
-    reissueTr.appendChild(td);
-    tr.after(reissueTr);
-  });
-
-  return tr;
-}
-
-// ---------------------------------------------------------------------
-// Step 4: reissue. Not a true Admin-SDK password reset (still needs
-// Blaze) -- creates a brand-new Auth account under a disambiguated email,
-// copies the profile over, disables the old account's doc, and repoints
-// usernames/{username} at the new account. Net effect for the user: same
-// username, new password, everything else unchanged.
-// ---------------------------------------------------------------------
-async function reissueUser(u, newPassword, errSpan, confirmBtn) {
-  if (!newPassword) { errSpan.textContent = 'Enter a password.'; return; }
-  confirmBtn.disabled = true;
-  errSpan.textContent = '';
-  try {
-    const disambiguatedEmail = `${u.username}.r${Date.now()}@${USERNAME_DOMAIN}`;
-    const newUid = await createAuthAccountWithoutSigningOut(disambiguatedEmail, newPassword);
-    await setDoc(doc(db, 'users', newUid), {
-      username: u.username, role: u.role, status: 'active'
-    });
-    await updateDoc(doc(db, 'users', u.uid), { status: 'disabled' });
-    await updateDoc(doc(db, 'usernames', u.username), { authEmail: disambiguatedEmail });
-    loadUserList();
-  } catch (err) {
-    errSpan.textContent = `Failed: ${err.message}`;
-    confirmBtn.disabled = false;
-  }
-}
-
-async function checkForUpdate(){
-  try{
-    const res = await fetch('./index.html', {cache:'no-store'});
-    const html = await res.text();
-    const match = html.match(/const APP_VERSION\s*=\s*'([^']+)'/);
-    if(!match) return;
-    const remoteVersion = match[1];
-    if(remoteVersion === APP_VERSION) return;
-    document.getElementById('updateBanner').style.display = 'flex';
-  }catch(e){ /* offline or not yet deployed — ignore */ }
-}
-document.getElementById('reloadBtn').addEventListener('click', ()=> location.reload());
-document.getElementById('dismissBtn').addEventListener('click', ()=>{
-  document.getElementById('updateBanner').style.display = 'none';
-});
-checkForUpdate();
-document.addEventListener('visibilitychange', ()=>{
-  if(document.visibilityState === 'visible') checkForUpdate();
-});
-</script>
+<script type="module" src="js/auth-ui.js"></script>
+<script type="module" src="js/admin-ui.js"></script>
+<script type="module" src="js/update-banner.js"></script>
+<script type="module" src="js/changelog.js"></script>
 </body>
 </html>
