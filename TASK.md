@@ -1,71 +1,72 @@
-# TASK — Iteration 2: Launch 0.1.0, then stand up the test/launch split
+# TASK — Iteration 3: Login types & Admin (roles, verifier tag, password reissue)
 
-**Target app version:** `0.2.0-t01` (after promoting the current build to plain `0.1.0` — see step 1)
-**Task drafted/updated:** 2026-09-16 (rev 2 — icon spec finalized)
+**Target app version:** `0.3.0-t01`
+**Task drafted/updated:** 2026-09-17 (rev 2 — username-stable identity model + reissue added after design discussion)
 
-Read `CLAUDE.md` first, then this file. Two distinct pieces of work below — do them in order, and keep the promotion as its own clean commit separate from the environment-split work.
+Read `CLAUDE.md` first, then `SPEC.md`'s "Roles" and "Authentication" sections (both revised today). Key change from rev 1: login no longer resolves a username straight to `username@smart-lab.internal` by formula — it goes through a small lookup doc instead, specifically so an admin can later swap out *which* Firebase account backs a username (a "reissue") without disturbing anything that references that person elsewhere in the app. This task builds that plus the admin screen; still no case/sample/action model.
 
-## Step 1: Promote `0.1.0-t05` to plain `0.1.0`
-This is the first real "launch" — dropping the testing suffix, nothing else changes functionally.
-1. Set `APP_VERSION` (and wherever else the version string appears, e.g. the manifest if it's duplicated there) from `0.1.0-t05` to `0.1.0`.
-2. Commit this alone, with a message that marks it as the launch (e.g. `Launch 0.1.0`), separate from anything else — this is the commit that would mark "what colleagues/clients are on" once real users exist.
-3. Push. This becomes the new root/launched baseline for everything below.
+## Step 1: Data model
+Two Firestore collections:
 
-## Step 2: Stand up the test/launch split
-Per `SPEC.md`'s "Environments" section:
-1. Create a `/test/` subfolder in the repo, containing a copy of the current app (`index.html`, `manifest.json`, `icon.svg`, `sw.js`, `firestore.rules` reference, etc.).
-   - **Icon:** use `icon-test.svg` (in the repo root, next to `icon.svg`) as `/test/icon.svg`. It's the exact same shape/background as the launched icon — only the accent color changed from green `#4ac98f` to amber `#f5a623` — so it reads as "same app family, test build" (same convention as e.g. Chrome Canary vs. Chrome). Rename the file to `icon.svg` inside `/test/` so `/test/manifest.json` doesn't need a path change.
-   - **Manifest:** in `/test/manifest.json`, set `"name": "Smart Lab (Test)"` and `"short_name": "Lab Test"` — the short_name is what shows under the home-screen icon, so it needs to read clearly at that size. Leave `theme_color`/`background_color` as-is (`#141a1f`) — same background ties it visually to root, the icon accent color is what signals "test."
-   - This matters now, before anyone installs either build, since a user can install both root and `/test/` to their phone home screen as two separate apps (same manifest scope rules as any PWA), and identical name/icon on both would make them easy to mix up.
-2. Create a second Firestore database named `test` in the same Firebase project (`gcloud firestore databases create --database=test --location=... --type=firestore-native` — check first whether the Firebase Console now offers this directly, since that'd be simpler for the user to do manually if you can't run `gcloud` yourself in this environment; if you can't create it yourself, write clear instructions for the user to do it, the same way the original Firebase setup instructions worked).
-3. Deploy `firestore.rules` to **both** databases — Security Rules are per-database, so the `test` database needs the same baseline rules applied separately (Console Rules tab, selecting the `test` database, or Firebase CLI with `--database=test` if you set that up).
-4. Point the `/test/` build's Firestore connection at the named `test` database (`getFirestore(app, "test")`), while the root build keeps using `getFirestore(app)` (the default database). Everything else about `/test/`'s code can stay identical to root for now — this step is purely about proving the split works, not adding new features yet.
-5. Version: `/test/` should display `0.2.0-t01` — going forward, `/test/` is where the *next* feature gets built and tested before it launches, so it starts versioned toward the next minor rather than re-testing `0.1.0`. Root stays at plain `0.1.0` throughout this whole iteration.
-6. **Verify isolation actually holds**: from `/test/`, write/read a `ping/latest` doc (same pattern as the existing round-trip test) and confirm it lands in the `test` database, not `(default)` — e.g. by checking the Firebase Console's Firestore data browser for both databases side by side. This is the actual proof the split works, not just "the code looks right."
-7. Commit and push.
+- **`users/{uid}`** — one doc per Firebase Auth account. Fields: `username` (string), `role` (`"client" | "team_leader" | "worker" | "admin"`), `verifier` (boolean — must be `false`/absent when `role === "client"`), `status` (`"active" | "disabled"`, default `"active"`).
+  - **Important for later:** `username` here is the stable identifier — once the case/sample/action model exists (a future iteration), it should reference people *by username*, never by `uid`. A `uid` can be replaced (see Step 4, reissue); a username isn't expected to change. Leave a code comment on this collection saying so, for whoever builds that later.
+  - Disabled accounts are never deleted — they just sit there permanently inert, and that's fine (see SPEC's Authentication section on why delete isn't being built).
+- **`usernames/{username}`** — one doc per login username. Fields: `authEmail` (string — whichever synthetic email currently signs this username in). This is what makes reissue possible: the username stays fixed, but which email/Firebase-account it points to can change.
+
+Security rules (`setup/firestore.rules`):
+- `usernames/{username}`: **public read** (needed before anyone's signed in, to resolve a typed username into an email to attempt sign-in with), admin-only write.
+- `users/{uid}`: a signed-in user can always read their own doc; only a caller whose own `users/{their uid}.role == "admin"` can read any `users/*` doc or write another user's doc. No client-side `delete`.
+- Don't over-engineer edge cases (e.g. an admin editing their own role) — a comment flagging it as a known gap is enough for this pass.
+
+**Login flow, updated:** username + password entered → read `usernames/{username}` → get `authEmail` → `signInWithEmailAndPassword(authEmail, password)` → on success, read `users/{resulting uid}` for role/verifier/status.
+
+**Manual bootstrap step, once, by the user (you can't do this from the app — no admin exists yet to grant the first one)**: after creating your own Firebase Auth account as before, manually create *both* `users/{your uid}` (`role: "admin"`, `status: "active"`) **and** `usernames/{your username}` (`authEmail: "<your synthetic email>"`) in the Firebase Console's Firestore data browser — both are needed for login to work under the new flow. Write clear step-by-step instructions for this into `setup/README.md`.
+
+## Step 2: Add-user (admin-only)
+- On login, look up the signed-in user's own `users/{uid}` doc. If `role !== "admin"`, don't render the admin screen at all (convenience only — the security rules above are the real protection).
+- Admin screen: a form (username, password, role dropdown, verifier checkbox — clear/disable it when role is `client`) to add a new user, plus a list of existing users (username/role/verifier/status) with inline editing of role, verifier, and status.
+- **Mechanism**: a second, temporary Firebase App instance (`initializeApp(firebaseConfig, "secondary")` with its own `getAuth()`) calls `createUserWithEmailAndPassword` with email `<username>@smart-lab.internal` on that secondary instance — creates the new Auth account without disturbing the admin's own session. Sign out and discard the secondary instance right after. Then, from the primary (still-admin) session, write `users/{newUid}` and `usernames/{username}`.
+- Editing an existing user's role/verifier/status is a plain Firestore update to their `users/{uid}` doc.
+
+## Step 3: Show role/tag after login
+- Somewhere visible after login (near the version banner is fine): show the logged-in username, their role, and "Verifier" if the tag is set. This is the main test surface for Steps 1–2.
+
+## Step 4: Reissue (admin-triggered password change for an existing user)
+This is how "change a user's password" actually gets built this iteration — not a true Admin-SDK reset (still needs Blaze, still deferred), but a Spark-compatible substitute that achieves the same practical outcome: the admin gives someone a new password.
+- On the admin screen's user list, a "Reissue" action per user, prompting for a new password.
+- Mechanism: same secondary-app-instance trick as Step 2 creates a **new** Firebase Auth account — needs a **different** internal email than the original, since the old account isn't being deleted (e.g. append a short disambiguator the user never sees, like `<username>.r2@smart-lab.internal`; exact scheme is your call, just make it obviously distinguishable in case you're ever looking at the Firebase Console directly).
+- Copy `username`, `role`, `verifier` from the old `users/{oldUid}` onto a new `users/{newUid}` doc (`status: "active"`). Set the old doc's `status` to `"disabled"`.
+- Update `usernames/{username}.authEmail` to the new account's email.
+- Result: the person logs in with the exact same username and the new password. Nothing else about them (role, verifier, and — once it exists — anything assigned to them by username) changes.
+- **Not building**: deleting a user's Auth account outright. Between "disable" (Step 1/2, already free) and "reissue" (this step), a real delete may never actually be needed — see SPEC's Authentication section. If it ever is, it stays a manual Firebase Console action, not an in-app one.
+
+## Step 5: Create test accounts and exercise all of it
+Using the admin screen:
+- Add one account per type: a `client` (no verifier), a `team_leader`, and a `worker` — put the verifier tag on one of the latter two, not the other.
+- Pick one non-admin account and **reissue** its password. Confirm: old password no longer works, new password logs in under the *same username*, and role/verifier/status are unchanged after the reissue.
+- (Your `admin` account is the one bootstrapped manually in Step 1.)
+
+## Where to build this
+`docs/test/` — same convention as the last iteration. Bump `docs/test/index.html`'s `APP_VERSION` to `0.3.0-t01`.
 
 ## Explicitly NOT in scope for this iteration
-- Any new user-facing feature (case/sample/action model, etc.) — `/test/` should be functionally identical to root at the end of this iteration, just pointed at different data.
-- Auth separation — both builds share the same Firebase Auth users, as settled in `SPEC.md`. Only the Firestore data is split.
-- Actually "launching" whatever gets built in `/test/` next — that's a future iteration's job, once there's a real feature there worth promoting.
+- Deleting a user's Auth account (see Step 4 — likely never needed at all; manual Console fallback if it ever is).
+- Any feature-level role *restriction* beyond hiding/showing the admin screen itself — no client-only or worker-only views of anything yet. That's Phase plan items 4–5, not this task.
+- Review-anonymity elevated admin access — unrelated open question.
 
 ## Definition of done
-- Root (`https://matanyaa.github.io/smart-lab/`) shows plain `0.1.0`, works exactly as it did before, unaffected by anything below.
-- `/test/` (`https://matanyaa.github.io/smart-lab/test/`) shows `0.2.0-t01`, logs in with the same account, and its Firestore round-trip writes/reads visibly land in the `test` database — confirmed by the user checking the Firebase Console, not just by the code compiling.
+- Logged in as the bootstrapped admin: the admin screen is visible, and you can add a new user for each role/tag combination in Step 5 and see them appear in the list.
+- Logging in as each newly-created account shows the correct role/tag on screen and does **not** show the admin screen.
+- Reissuing one account's password works exactly as described in Step 5 — same username, new password, unchanged role/verifier/status.
+- The Firestore rules are actually enforcing this, not just the UI hiding buttons — e.g. a non-admin account's direct read of another user's `users/*` doc should genuinely fail.
 
 ## Versioning
-Root: `0.1.0` (launched, step 1). `/test/`: `0.2.0-t01`, bumping `-t02`, `-t03`... if more passes are needed within this iteration.
+`docs/test/`: `0.3.0-t01`, bumping `-t02`, `-t03`... if more passes are needed. Root stays at plain `0.1.0` throughout — untouched by this task.
 
 ## When done
-- Add a short note below this line: what you built, any deviations, any questions or blockers — especially if you couldn't create the second database yourself and had to hand that step to the user.
-- Log any real decisions (exact `gcloud`/Console steps that worked, file structure under `/test/`, anything about the update-check banner needing to know which build it's in) as a dated entry in `SPEC.md`'s Decisions Log.
+- Add a short completion note below this line: what you built, any deviations, any questions or blockers.
+- Log any real decisions (exact rules syntax, the secondary-app-instance code pattern, the reissue email-disambiguation scheme you picked, anything about the admin-bootstrap step that wasn't obvious) as a dated entry in `SPEC.md`'s Decisions Log.
 
 ---
 
 *(Claude Code: add your completion note below this line.)*
-
-**Done — 2026-09-17.** Step 1: `0.1.0` launched (dropped the `-t05` suffix), separate commit, pushed. Step 2: `docs/test/` stood up as a copy of the launched build.
-
-Note the repo was restructured (app code moved to `docs/`, setup docs to `setup/`) between this TASK.md's drafting and today's build — "repo root" and `/test/` in this file's wording map to `docs/` and `docs/test/` respectively; see `CLAUDE.md`'s "Repo layout" and today's two new `SPEC.md` Decisions Log entries.
-
-- `docs/test/icon.svg` — used the design session's `icon-test.svg` (amber `#f5a623` accent), found already dropped at both repo root and `docs/` — removed both stray copies after copying it into place at `docs/test/icon.svg`.
-- `docs/test/manifest.json` — `name: "Smart Lab (Test)"`, `short_name: "Lab Test"`; colors unchanged.
-- `docs/test/index.html` — `APP_VERSION = '0.2.0-t01'`. Everything else identical to the launched build.
-- No separate `docs/test/firestore.rules` — the canonical copy stays in `setup/firestore.rules` (from the earlier restructure), same content applies to both databases.
-
-**Update 2026-09-17 — plan changed mid-build.** Firestore's second-named-database feature (this task's original mechanism for isolating `docs/test/`'s data) turned out to need the paid Blaze plan; the user is on Spark (free), which only allows `(default)`. Rather than silently reverting to the naming-convention approach `SPEC.md` had explicitly rejected, surfaced it as a design fork and asked — user chose to stay on Spark with a collection-name prefix. So `docs/test/index.html` now uses the plain `getFirestore(app)` (same `(default)` database as the launched build) and writes its round-trip test to `test_ping/latest` instead of `ping/latest`. `setup/README.md`'s test-environment section rewritten to match (no database to create; nothing new needed in the Firebase Console beyond what's already set up). Full rationale and the rejected alternatives logged in `SPEC.md`'s Decisions Log.
-
-**Verification still needed from you:** log into `/test/`, run "Test Firestore round-trip," then check the Firebase Console's `(default)` database data browser — you should see both a `ping` doc (from earlier root testing) and a separate `test_ping` doc (from this test), confirming they don't collide.
-
-**Update 2026-09-17 — `/test/` dropped as a separately-installable PWA.** Testing showed Android can't offer two independent home-screen icons when one URL path is nested under the other (`/test/` under `/`) — this is a strict web-platform limitation (manifest `scope` is a prefix match with no way to exclude a subpath), not something fixable with more manifest tweaks; confirmed after trying an explicit `id` field and a full uninstall/reinstall, still collided. Removed `docs/test/manifest.json` and `docs/test/sw.js` — `/test/` is browser bookmark/tab access only now, not home-screen-installable. This walks back one part of this TASK.md's icon/manifest spec (step 1's `icon-test.svg`/manifest naming work), since there's no longer a manifest for it to apply to. Full writeup in `SPEC.md`'s Decisions Log. If a genuinely separate installable test icon ever matters enough, the real fix is a second repo at a sibling (non-nested) path — costs a second repo to keep in sync, not attempted here.
-
-**Task complete — 2026-09-17. Current app versions: root `0.1.0`, `/test/` `0.2.0-t01`.**
-
-Both of this iteration's two steps are done and user-verified: root launched at plain `0.1.0` (dropped `-t05`), and `/test/` stood up and confirmed data-isolated from root — the Firebase Console shows `ping` and `test_ping` as two separate top-level collections in the shared `(default)` database, proving writes from each build don't collide despite sharing everything else (Auth, database, rules).
-
-Net deviations from this TASK.md's original design, all discovered mid-build and resolved with the user rather than guessed silently:
-- **Data isolation mechanism changed**: planned second named Firestore database → collection-name prefix (`ping` vs `test_ping`) in the shared `(default)` database, because that feature needs the paid Blaze plan and this project is on Spark (free).
-- **`/test/` isn't home-screen-installable**: dropped entirely rather than partially working, because nested URL paths can't produce two independent PWA install identities on Android — a platform limitation, not a bug to keep chasing.
-- Repo also got restructured earlier this session (`docs/`/`setup/` split) at the user's request, ahead of and compatible with this iteration's `/test/` work — see the two Decisions Log entries dated earlier today.
-
-No open blockers. Next: a follow-up TASK.md from the design session — likely the actual case/sample/action data model, now that infra + environments are both proven working.
