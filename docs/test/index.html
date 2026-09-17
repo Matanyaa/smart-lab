@@ -163,7 +163,7 @@ import {
   getFirestore, doc, getDoc, setDoc, updateDoc, collection, getDocs, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 
-const APP_VERSION = '0.3.0-t01';
+const APP_VERSION = '0.3.0-t02';
 document.getElementById('versionBadge').textContent = `v${APP_VERSION}`;
 
 // --- Firebase config ---
@@ -219,7 +219,8 @@ loginForm.addEventListener('submit', async (e) => {
     const { authEmail } = usernameSnap.data();
     await signInWithEmailAndPassword(auth, authEmail, password);
   } catch (err) {
-    loginError.textContent = 'Login failed: check username and password.';
+    console.error('Login failed:', err);
+    loginError.textContent = `Login failed: check username and password. (${err.code || err.message})`;
   } finally {
     loginBtn.disabled = false;
   }
