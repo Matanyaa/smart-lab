@@ -41,7 +41,15 @@ service cloud.firestore {
       // their own doc. Usernames/roles aren't sensitive within the team.
       allow read: if isSignedIn() && (request.auth.uid == uid || isStaff());
       allow create, update: if isAdmin();
-      allow delete: if false;
+      // Changed 2026-09-18: admin can now delete a user's Firestore
+      // profile doc (including automatically for reissue's old account --
+      // see admin-ui.js). This does NOT delete the underlying Firebase
+      // Auth credential itself -- that still needs the Admin SDK (Blaze),
+      // same constraint as ever. Deleting the profile doc is still a real
+      // lockout though: every rule here keys off this doc existing, so a
+      // signed-in user with no users/{uid} doc can authenticate but reads
+      // and writes everywhere else fail closed.
+      allow delete: if isAdmin();
     }
 
     match /cases/{caseId} {

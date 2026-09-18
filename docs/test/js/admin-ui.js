@@ -1,6 +1,6 @@
 import { db, USERNAME_DOMAIN, createAuthAccountWithoutSigningOut } from './firebase-init.js';
 import {
-  doc, setDoc, updateDoc, collection, getDocs
+  doc, setDoc, updateDoc, deleteDoc, collection, getDocs
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 
 // ---------------------------------------------------------------------
@@ -130,44 +130,89 @@ function renderUserRow(u) {
   reissueBtn.textContent = 'Reissue';
   actionTd.appendChild(reissueBtn);
 
+  // Admin can delete a user's profile (2026-09-18) -- not offered on the
+  // admin's own row, same as the other edit controls above.
+  let deleteBtn = null;
+  if (u.role !== 'admin') {
+    deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.className = 'btn btn-small';
+    deleteBtn.textContent = 'Delete';
+    deleteBtn.style.marginLeft = '6px';
+    actionTd.appendChild(deleteBtn);
+  }
+
   tr.appendChild(usernameTd);
   tr.appendChild(roleTd);
   tr.appendChild(statusTd);
   tr.appendChild(actionTd);
 
-  reissueBtn.addEventListener('click', () => {
-    if (tr.querySelector('.reissue-row')) return; // already open
-    const reissueTr = document.createElement('tr');
-    reissueTr.className = 'reissue-row';
+  // Shared by Reissue and Delete -- only one inline sub-row open at a time.
+  function openInlineRow(build) {
+    if (tr.nextElementSibling && tr.nextElementSibling.classList.contains('inline-action-row')) return;
+    const inlineTr = document.createElement('tr');
+    inlineTr.className = 'inline-action-row';
     const td = document.createElement('td');
     td.colSpan = 4;
-    const input = document.createElement('input');
-    input.type = 'password';
-    input.placeholder = 'New password';
-    const confirmBtn = document.createElement('button');
-    confirmBtn.type = 'button';
-    confirmBtn.className = 'btn btn-small btn-primary';
-    confirmBtn.textContent = 'Confirm';
-    confirmBtn.style.marginLeft = '8px';
-    const cancelBtn = document.createElement('button');
-    cancelBtn.type = 'button';
-    cancelBtn.className = 'btn btn-small';
-    cancelBtn.textContent = 'Cancel';
-    cancelBtn.style.marginLeft = '8px';
-    const errSpan = document.createElement('span');
-    errSpan.className = 'error';
-    errSpan.style.marginLeft = '8px';
+    build(td, () => inlineTr.remove());
+    inlineTr.appendChild(td);
+    tr.after(inlineTr);
+  }
 
-    cancelBtn.addEventListener('click', () => reissueTr.remove());
-    confirmBtn.addEventListener('click', () => reissueUser(u, input.value, errSpan, confirmBtn));
+  reissueBtn.addEventListener('click', () => {
+    openInlineRow((td, close) => {
+      const input = document.createElement('input');
+      input.type = 'password';
+      input.placeholder = 'New password';
+      const confirmBtn = document.createElement('button');
+      confirmBtn.type = 'button';
+      confirmBtn.className = 'btn btn-small btn-primary';
+      confirmBtn.textContent = 'Confirm';
+      confirmBtn.style.marginLeft = '8px';
+      const cancelBtn = document.createElement('button');
+      cancelBtn.type = 'button';
+      cancelBtn.className = 'btn btn-small';
+      cancelBtn.textContent = 'Cancel';
+      cancelBtn.style.marginLeft = '8px';
+      const errSpan = document.createElement('span');
+      errSpan.className = 'error';
+      errSpan.style.marginLeft = '8px';
 
-    td.appendChild(input);
-    td.appendChild(confirmBtn);
-    td.appendChild(cancelBtn);
-    td.appendChild(errSpan);
-    reissueTr.appendChild(td);
-    tr.after(reissueTr);
+      cancelBtn.addEventListener('click', close);
+      confirmBtn.addEventListener('click', () => reissueUser(u, input.value, errSpan, confirmBtn));
+
+      td.append(input, confirmBtn, cancelBtn, errSpan);
+    });
   });
+
+  if (deleteBtn) {
+    deleteBtn.addEventListener('click', () => {
+      openInlineRow((td, close) => {
+        const msg = document.createElement('span');
+        msg.className = 'error';
+        msg.textContent = `Delete ${u.username}'s profile? They'll immediately lose all access. `;
+        const confirmBtn = document.createElement('button');
+        confirmBtn.type = 'button';
+        confirmBtn.className = 'btn btn-small btn-primary';
+        confirmBtn.textContent = 'Confirm delete';
+        confirmBtn.style.marginLeft = '8px';
+        const cancelBtn = document.createElement('button');
+        cancelBtn.type = 'button';
+        cancelBtn.className = 'btn btn-small';
+        cancelBtn.textContent = 'Cancel';
+        cancelBtn.style.marginLeft = '8px';
+
+        cancelBtn.addEventListener('click', close);
+        confirmBtn.addEventListener('click', async () => {
+          confirmBtn.disabled = true;
+          await deleteDoc(doc(db, 'users', u.uid));
+          loadUserList();
+        });
+
+        td.append(msg, confirmBtn, cancelBtn);
+      });
+    });
+  }
 
   return tr;
 }
@@ -175,9 +220,15 @@ function renderUserRow(u) {
 // ---------------------------------------------------------------------
 // Reissue. Not a true Admin-SDK password reset (still needs Blaze) --
 // creates a brand-new Auth account under a disambiguated email, copies
-// the profile over, disables the old account's doc, and repoints
-// usernames/{username} at the new account. Net effect for the user: same
-// username, new password, everything else unchanged.
+// the profile over, repoints usernames/{username} at the new account,
+// and deletes the old account's profile doc (2026-09-18: previously just
+// disabled it and left it sitting there; the user asked for it to be
+// cleaned up automatically instead). This does NOT delete the old
+// account's underlying Firebase Auth credential -- that still isn't
+// possible client-side without the Admin SDK (Blaze) -- but with its
+// profile doc gone, every rule in setup/firestore.rules denies it, so
+// it's a real, immediate lockout, not just a UI-hidden one. Net effect
+// for the user: same username, new password, everything else unchanged.
 // ---------------------------------------------------------------------
 async function reissueUser(u, newPassword, errSpan, confirmBtn) {
   if (!newPassword) { errSpan.textContent = 'Enter a password.'; return; }
@@ -189,8 +240,8 @@ async function reissueUser(u, newPassword, errSpan, confirmBtn) {
     await setDoc(doc(db, 'users', newUid), {
       username: u.username, role: u.role, status: 'active'
     });
-    await updateDoc(doc(db, 'users', u.uid), { status: 'disabled' });
     await updateDoc(doc(db, 'usernames', u.username), { authEmail: disambiguatedEmail });
+    await deleteDoc(doc(db, 'users', u.uid));
     loadUserList();
   } catch (err) {
     errSpan.textContent = `Failed: ${err.message}`;

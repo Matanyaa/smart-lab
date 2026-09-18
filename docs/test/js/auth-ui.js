@@ -130,9 +130,11 @@ onAuthStateChanged(auth, async (user) => {
     adminScreen.classList.add('hidden');
   }
 
-  // Cases screen is internal to the lab team -- clients have no view
-  // built yet (Phase plan item 5), so they're excluded here too.
-  if (['admin', 'team_leader', 'worker'].includes(profile.role)) {
+  // Cases screen is for the working lab team, not admin -- admin's role
+  // this iteration is purely user management (2026-09-18, at the user's
+  // request; TASK.md had originally allowed admin case access "for
+  // testing purposes", but that's been narrowed back down deliberately).
+  if (['team_leader', 'worker'].includes(profile.role)) {
     showCasesScreen(currentProfile);
   } else {
     hideCasesScreen();
