@@ -15,7 +15,20 @@ async function checkForUpdate(){
     document.getElementById('updateBanner').style.display = 'flex';
   }catch(e){ /* offline or not yet deployed — ignore */ }
 }
-document.getElementById('reloadBtn').addEventListener('click', ()=> location.reload());
+// A plain location.reload() doesn't guarantee bypassing the browser's
+// HTTP cache for index.html or the module files it loads (unlike
+// icon.svg, none of these are cache-busted with a ?v= query string) --
+// within GitHub Pages' 10-minute Cache-Control window, clicking Reload
+// could still run the old cached code entirely. Fixed by force-refetching
+// index.html and every module script first (cache:'reload' bypasses
+// reading the cache but still writes the fresh response into it), so the
+// actual reload right after picks up what was just fetched instead of
+// whatever was cached before.
+document.getElementById('reloadBtn').addEventListener('click', async () => {
+  const urls = ['./index.html', ...Array.from(document.querySelectorAll('script[type="module"][src]')).map((s) => s.src)];
+  await Promise.all(urls.map((url) => fetch(url, { cache: 'reload' }).catch(() => {})));
+  location.reload();
+});
 document.getElementById('dismissBtn').addEventListener('click', ()=>{
   document.getElementById('updateBanner').style.display = 'none';
 });
