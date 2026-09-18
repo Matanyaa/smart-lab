@@ -168,14 +168,28 @@ function renderUserRow(u) {
         cancelBtn.textContent = 'Cancel';
         cancelBtn.style.marginLeft = '8px';
 
+        const errSpan = document.createElement('span');
+        errSpan.className = 'error';
+        errSpan.style.marginLeft = '8px';
+
         cancelBtn.addEventListener('click', close);
         confirmBtn.addEventListener('click', async () => {
           confirmBtn.disabled = true;
-          await deleteDoc(doc(db, 'users', u.uid));
-          loadUserList();
+          try {
+            // Deleting only users/{uid} left usernames/{username} behind,
+            // still pointing at the (now-nonexistent) account -- an
+            // orphaned doc sitting in Firestore even though the app
+            // itself looked fully deleted. Fixed 2026-09-18: delete both.
+            await deleteDoc(doc(db, 'users', u.uid));
+            await deleteDoc(doc(db, 'usernames', u.username));
+            loadUserList();
+          } catch (err) {
+            errSpan.textContent = `Failed: ${err.message}`;
+            confirmBtn.disabled = false;
+          }
         });
 
-        td.append(msg, confirmBtn, cancelBtn);
+        td.append(msg, confirmBtn, cancelBtn, errSpan);
       });
     });
   }
