@@ -6,11 +6,17 @@ import {
   initializeFirestore, persistentLocalCache
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 
-// NOTE: icon.svg is referenced with a ?v=<version> query string in the
-// <link rel="icon"> and the header <img> in index.html, to bust the
-// browser's HTTP cache on every deploy. Bump those alongside this
-// constant on every version change.
-export const APP_VERSION = '0.4.0-t08';
+// NOTE: icon.svg, every <script type="module" src="...?v=..."> tag in
+// index.html, and every local cross-import between the js/ modules below
+// (e.g. `from './firebase-init.js?v=...'`) all carry this same version as
+// a ?v= query string, to bust the browser's HTTP cache on every deploy
+// (2026-09-18: a plain location.reload() plus cache:'reload' pre-fetching
+// was tried first and empirically failed to pick up a fresh deploy --
+// see HANDOFF.md. A different URL per version is the only cache-busting
+// approach proven to actually work here). Bump ALL of those alongside
+// this constant on every version change -- see docs/test/index.html and
+// each js/*.js file's own import line.
+export const APP_VERSION = '0.4.0-t09';
 
 export const USERNAME_DOMAIN = 'smart-lab.internal';
 

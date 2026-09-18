@@ -1,4 +1,4 @@
-import { APP_VERSION } from './firebase-init.js';
+import { APP_VERSION } from './firebase-init.js?v=0.4.0-t09';
 
 // Plain-language, user-facing history -- distinct from SPEC.md's Decisions
 // Log (design/build rationale) and HANDOFF.md (Claude Code's build notes).
