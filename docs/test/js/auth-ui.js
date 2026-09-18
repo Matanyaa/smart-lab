@@ -20,7 +20,7 @@ const changePasswordForm = document.getElementById('changePasswordForm');
 const changePasswordError = document.getElementById('changePasswordError');
 const changePasswordSuccess = document.getElementById('changePasswordSuccess');
 
-let currentProfile = null; // { uid, username, role, status }
+let currentProfile = null; // { uid, username, role }
 
 showChangePasswordBtn.addEventListener('click', () => {
   changePasswordScreen.classList.toggle('hidden');

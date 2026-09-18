@@ -4,11 +4,12 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 
 // ---------------------------------------------------------------------
-// Admin: add user + edit role/status + reissue password.
+// Admin: add user + edit role + reissue password.
 // Convenience-only gating here (hide the screen) -- the actual protection
 // is the isAdmin() check in setup/firestore.rules.
 // Verifier is intentionally not modeled here -- stripped for now, coming
-// back later in a different shape.
+// back later in a different shape. Status is gone too (2026-09-18) --
+// delete now covers what "disabled" used to be for, see reissueUser.
 // ---------------------------------------------------------------------
 const addUserForm = document.getElementById('addUserForm');
 const addUserBtn = document.getElementById('addUserBtn');
@@ -31,7 +32,7 @@ addUserForm.addEventListener('submit', async (e) => {
     // username is the stable identifier -- a future case/sample/action
     // model should reference people by username, never by uid, since the
     // uid behind a username can change via reissue (see Step 4).
-    await setDoc(doc(db, 'users', newUid), { username, role, status: 'active' });
+    await setDoc(doc(db, 'users', newUid), { username, role });
     await setDoc(doc(db, 'usernames', username), { authEmail });
     addUserForm.reset();
     loadUserList();
@@ -45,7 +46,7 @@ addUserForm.addEventListener('submit', async (e) => {
 });
 
 export async function loadUserList() {
-  userListBody.innerHTML = '<tr><td colspan="4" class="muted">Loading…</td></tr>';
+  userListBody.innerHTML = '<tr><td colspan="3" class="muted">Loading…</td></tr>';
   const snap = await getDocs(collection(db, 'users'));
   allUsers = [];
   snap.forEach((d) => allUsers.push({ uid: d.id, ...d.data() }));
@@ -53,14 +54,10 @@ export async function loadUserList() {
   renderUserList();
 }
 
-// No active/disabled filter anymore (removed 2026-09-18) -- now that
-// delete actually removes an unwanted account instead of just disabling
-// it, there's no growing disabled-list clutter to filter away. Shows
-// everyone, active or disabled, in one list.
 function renderUserList() {
   userListBody.innerHTML = '';
   if (allUsers.length === 0) {
-    userListBody.innerHTML = '<tr><td colspan="4" class="muted">No users yet.</td></tr>';
+    userListBody.innerHTML = '<tr><td colspan="3" class="muted">No users yet.</td></tr>';
     return;
   }
   allUsers.forEach((u) => userListBody.appendChild(renderUserRow(u)));
@@ -75,10 +72,9 @@ function renderUserRow(u) {
   // screen (no "admin" option ever appears in the role dropdown either,
   // above), and there's no second admin to promote -- so its own row is
   // read-only display rather than the usual edit controls.
-  let roleTd, statusTd;
+  let roleTd;
   if (u.role === 'admin') {
     roleTd = document.createElement('td'); roleTd.textContent = u.role;
-    statusTd = document.createElement('td'); statusTd.textContent = u.status;
   } else {
     const roleSelect = document.createElement('select');
     ['client', 'team_leader', 'worker'].forEach((r) => {
@@ -89,23 +85,9 @@ function renderUserRow(u) {
       roleSelect.appendChild(opt);
     });
 
-    const statusSelect = document.createElement('select');
-    ['active', 'disabled'].forEach((s) => {
-      const opt = document.createElement('option');
-      opt.value = s;
-      opt.textContent = s;
-      if (s === u.status) opt.selected = true;
-      statusSelect.appendChild(opt);
-    });
-
-    async function saveField(field, value) {
-      await updateDoc(doc(db, 'users', u.uid), { [field]: value });
-    }
-    roleSelect.addEventListener('change', () => saveField('role', roleSelect.value));
-    statusSelect.addEventListener('change', () => saveField('status', statusSelect.value));
+    roleSelect.addEventListener('change', () => updateDoc(doc(db, 'users', u.uid), { role: roleSelect.value }));
 
     roleTd = document.createElement('td'); roleTd.appendChild(roleSelect);
-    statusTd = document.createElement('td'); statusTd.appendChild(statusSelect);
   }
 
   const actionTd = document.createElement('td');
@@ -129,7 +111,6 @@ function renderUserRow(u) {
 
   tr.appendChild(usernameTd);
   tr.appendChild(roleTd);
-  tr.appendChild(statusTd);
   tr.appendChild(actionTd);
 
   // Shared by Reissue and Delete -- only one inline sub-row open at a time.
@@ -138,7 +119,7 @@ function renderUserRow(u) {
     const inlineTr = document.createElement('tr');
     inlineTr.className = 'inline-action-row';
     const td = document.createElement('td');
-    td.colSpan = 4;
+    td.colSpan = 3;
     build(td, () => inlineTr.remove());
     inlineTr.appendChild(td);
     tr.after(inlineTr);
@@ -222,9 +203,7 @@ async function reissueUser(u, newPassword, errSpan, confirmBtn) {
   try {
     const disambiguatedEmail = `${u.username}.r${Date.now()}@${USERNAME_DOMAIN}`;
     const newUid = await createAuthAccountWithoutSigningOut(disambiguatedEmail, newPassword);
-    await setDoc(doc(db, 'users', newUid), {
-      username: u.username, role: u.role, status: 'active'
-    });
+    await setDoc(doc(db, 'users', newUid), { username: u.username, role: u.role });
     await updateDoc(doc(db, 'usernames', u.username), { authEmail: disambiguatedEmail });
     await deleteDoc(doc(db, 'users', u.uid));
     loadUserList();

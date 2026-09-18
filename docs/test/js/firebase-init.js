@@ -10,7 +10,7 @@ import {
 // <link rel="icon"> and the header <img> in index.html, to bust the
 // browser's HTTP cache on every deploy. Bump those alongside this
 // constant on every version change.
-export const APP_VERSION = '0.4.0-t04';
+export const APP_VERSION = '0.4.0-t05';
 
 export const USERNAME_DOMAIN = 'smart-lab.internal';
 
