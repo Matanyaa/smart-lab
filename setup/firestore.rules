@@ -18,13 +18,22 @@ service cloud.firestore {
     function isAdmin() {
       return myRole() == 'admin';
     }
-    // Case work is internal to the lab team -- clients have no view built
-    // yet (Phase plan item 5), so they're excluded from all of it for now.
+    // Used only for the users collection itself (admin needs the full list
+    // for user management; team_leader/worker need it for case-manager
+    // pickers) -- NOT for case/sample/action access, see isCaseStaff().
     function isStaff() {
       return myRole() in ['admin', 'team_leader', 'worker'];
     }
-    function isLeadOrAdmin() {
-      return myRole() in ['admin', 'team_leader'];
+    // 0.4.1: admin has zero rule-level access to case data, not even read
+    // (closing the gap Iteration 4 left open -- see HANDOFF.md/SPEC.md).
+    // Case work is internal to the lab team; clients get their own,
+    // separately-scoped read rule below instead of being lumped in here.
+    function isCaseStaff() {
+      return myRole() in ['team_leader', 'worker'];
+    }
+    function clientBelongsToMyOrg(clientId) {
+      return clientId != null
+        && get(/databases/$(database)/documents/clients/$(clientId)).data.clientOrgId == myProfile().clientOrgId;
     }
 
     // Must be readable while signed out, to resolve a typed username into
@@ -52,32 +61,59 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    match /cases/{caseId} {
+    // 0.4.1: admin-managed global lookups. Read is any signed-in staff
+    // (team_leader/worker need case types for case creation, and clients
+    // for the case's client picker) plus any client account (org/client
+    // names aren't sensitive, same reasoning as usernames/roles) -- write
+    // is admin-only, matching the admin user-management screen's pattern.
+    match /caseTypes/{caseTypeId} {
       allow read: if isStaff();
-      allow create: if isLeadOrAdmin();
+      allow write: if isAdmin();
+    }
+    match /clientOrgs/{orgId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+    match /clients/{clientId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /cases/{caseId} {
+      // 0.4.1: admin dropped entirely (was isStaff(), which included
+      // admin) -- team_leader/worker as before, plus a client-org account
+      // reading a case whose client belongs to that same org.
+      allow read: if isCaseStaff() || (myRole() == 'client' && clientBelongsToMyOrg(resource.data.client));
+      // 0.4.1: narrowed from isLeadOrAdmin() (team_leader-or-admin) to
+      // team_leader only, now that admin has no case-data access at all.
+      // openedBy is set by the app, not user-entered -- enforced here too,
+      // not just trusted client-side.
+      allow create: if myRole() == 'team_leader' && request.resource.data.openedBy == myUsername();
       // Broader than create: a case's own caseManager (a worker or
-      // team_leader named on the case, not necessarily who created it)
+      // team_leader named on the case, not necessarily who opened it)
       // needs to update it day-to-day too.
-      allow update: if isSignedIn() && (isLeadOrAdmin() || resource.data.caseManager == myUsername());
-      // Deliberately NOT admin -- matches SPEC's "team leader signs off
-      // final archiving" and TASK's explicit exclusion of admin from
-      // "Approve & delete", since this is real, permanent, cascading
-      // deletion. The one place in this whole feature that's a hard
-      // rule rather than a UI-only restriction.
+      allow update: if isCaseStaff() && (myRole() == 'team_leader' || resource.data.caseManager == myUsername());
+      // 0.4.1: deletion is now a standalone team-leader judgment call at
+      // any stage (was implicitly tied to reaching "done" at the UI
+      // level) -- this rule itself is unchanged, since it was already
+      // team_leader-only with no admin exception; only the UI-side
+      // done-stage restriction is what's being lifted.
       allow delete: if isSignedIn() && myRole() == 'team_leader';
 
       match /samples/{sampleId} {
-        allow read: if isStaff();
-        allow create, update: if isStaff();
+        allow read, create, update: if isCaseStaff();
         allow delete: if isSignedIn() && myRole() == 'team_leader';
 
         match /actions/{actionId} {
-          allow read: if isStaff();
-          allow create, update: if isStaff();
+          allow read, create, update: if isCaseStaff();
           allow delete: if isSignedIn() && myRole() == 'team_leader';
         }
+      }
+
+      match /notes/{noteId} {
+        allow read, create, update: if isCaseStaff();
+        allow delete: if isSignedIn() && myRole() == 'team_leader';
       }
     }
   }
 }
-

@@ -1,7 +1,9 @@
-import { db, USERNAME_DOMAIN, createAuthAccountWithoutSigningOut } from './firebase-init.js?v=0.4.0-t11';
+import { db, USERNAME_DOMAIN, createAuthAccountWithoutSigningOut } from './firebase-init.js?v=0.4.1-t01';
 import {
   doc, setDoc, updateDoc, deleteDoc, collection, getDocs
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+import { renderCaseTypeList } from './case-types-ui.js?v=0.4.1-t01';
+import { renderClientOrgList, getCachedClientOrgs, loadClientOrgsAndClients } from './clients-ui.js?v=0.4.1-t01';
 
 // ---------------------------------------------------------------------
 // Admin: add user + edit role + reset another user's password.
@@ -21,8 +23,29 @@ const addUserBtn = document.getElementById('addUserBtn');
 const addUserError = document.getElementById('addUserError');
 const newRoleSelect = document.getElementById('newRole');
 const userListBody = document.getElementById('userListBody');
+const newUserClientOrgField = document.getElementById('newUserClientOrgField');
+const newUserClientOrgSelect = document.getElementById('newUserClientOrg');
 
 let allUsers = [];
+
+// 0.4.1: a client-role account is a shared login for exactly one client
+// org (see SPEC.md's "Client org / Client") -- it needs to know which org
+// that is, so the field only shows (and is only required) when 'client'
+// is picked.
+newRoleSelect.addEventListener('change', async () => {
+  const isClient = newRoleSelect.value === 'client';
+  newUserClientOrgField.hidden = !isClient;
+  if (isClient) {
+    await loadClientOrgsAndClients();
+    newUserClientOrgSelect.innerHTML = '';
+    getCachedClientOrgs().forEach((org) => {
+      const opt = document.createElement('option');
+      opt.value = org.id;
+      opt.textContent = org.name;
+      newUserClientOrgSelect.appendChild(opt);
+    });
+  }
+});
 
 addUserForm.addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -32,14 +55,22 @@ addUserForm.addEventListener('submit', async (e) => {
   const password = document.getElementById('newPassword').value;
   const role = newRoleSelect.value;
   const authEmail = `${username}@${USERNAME_DOMAIN}`;
+  if (role === 'client' && !newUserClientOrgSelect.value) {
+    addUserError.textContent = 'Pick a client org.';
+    addUserBtn.disabled = false;
+    return;
+  }
   try {
     const newUid = await createAuthAccountWithoutSigningOut(authEmail, password);
     // username is the stable identifier -- a future case/sample/action
     // model should reference people by username, never by uid, since the
     // uid behind a username can change via reissue (see Step 4).
-    await setDoc(doc(db, 'users', newUid), { username, role });
+    const profile = { username, role };
+    if (role === 'client') profile.clientOrgId = newUserClientOrgSelect.value;
+    await setDoc(doc(db, 'users', newUid), profile);
     await setDoc(doc(db, 'usernames', username), { authEmail });
     addUserForm.reset();
+    newUserClientOrgField.hidden = true;
     loadUserList();
   } catch (err) {
     addUserError.textContent = err.code === 'auth/email-already-in-use'
@@ -48,6 +79,20 @@ addUserForm.addEventListener('submit', async (e) => {
   } finally {
     addUserBtn.disabled = false;
   }
+});
+
+// 0.4.1: admin screen gained two more tabs (Case types, Clients) alongside
+// the original Users panel -- a plain show/hide toggle, not a router.
+document.querySelectorAll('#adminTabs .tab-btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#adminTabs .tab-btn').forEach((b) => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.querySelectorAll('.admin-panel').forEach((p) => p.classList.add('hidden'));
+    const panel = document.getElementById(btn.dataset.tab);
+    panel.classList.remove('hidden');
+    if (btn.dataset.tab === 'adminCaseTypesPanel') renderCaseTypeList();
+    if (btn.dataset.tab === 'adminClientsPanel') renderClientOrgList();
+  });
 });
 
 export async function loadUserList() {
@@ -228,7 +273,11 @@ async function resetUserPassword(u, newPassword, errSpan, confirmBtn) {
   try {
     const disambiguatedEmail = `${u.username}.r${Date.now()}@${USERNAME_DOMAIN}`;
     const newUid = await createAuthAccountWithoutSigningOut(disambiguatedEmail, newPassword);
-    await setDoc(doc(db, 'users', newUid), { username: u.username, role: u.role });
+    // Carries clientOrgId forward too (0.4.1) -- otherwise resetting a
+    // client account's password would silently strip its org link.
+    const profile = { username: u.username, role: u.role };
+    if (u.clientOrgId) profile.clientOrgId = u.clientOrgId;
+    await setDoc(doc(db, 'users', newUid), profile);
     await updateDoc(doc(db, 'usernames', u.username), { authEmail: disambiguatedEmail });
     await deleteDoc(doc(db, 'users', u.uid));
     loadUserList();

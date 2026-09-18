@@ -1,4 +1,4 @@
-import { APP_VERSION } from './firebase-init.js?v=0.4.0-t11';
+import { APP_VERSION } from './firebase-init.js?v=0.4.1-t01';
 
 // Plain-language, user-facing history -- distinct from SPEC.md's Decisions
 // Log (design/build rationale) and HANDOFF.md (Claude Code's build notes).
@@ -19,6 +19,17 @@ const CHANGELOG = [
     date: '2026-09-18',
     notes: [
       'New: track cases, their samples, and the tests run on each one, from creation through to archiving.'
+    ]
+  },
+  {
+    version: '0.4.1',
+    date: '2026-09-18',
+    notes: [
+      'Cases now have a Notes tab, and actions can require a second person to verify measurements.',
+      'New: case types and client/client-org lookups, used when creating a case.',
+      'Clients can now log in to see their own cases’ status.',
+      'Case manager is optional when creating a case, and cases can be deleted at any stage.',
+      'Clearer "+ New case" button that shows when it’s open.'
     ]
   }
 ];

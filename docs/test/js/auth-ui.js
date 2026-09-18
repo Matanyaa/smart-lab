@@ -1,11 +1,12 @@
-import { auth, db, USERNAME_DOMAIN } from './firebase-init.js?v=0.4.0-t11';
+import { auth, db, USERNAME_DOMAIN } from './firebase-init.js?v=0.4.1-t01';
 import {
   signInWithEmailAndPassword, signOut, onAuthStateChanged,
   updatePassword, reauthenticateWithCredential, EmailAuthProvider
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
 import { doc, getDoc } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { loadUserList } from './admin-ui.js?v=0.4.0-t11';
-import { showCasesScreen, hideCasesScreen } from './cases.js?v=0.4.0-t11';
+import { loadUserList } from './admin-ui.js?v=0.4.1-t01';
+import { showCasesScreen, hideCasesScreen } from './cases.js?v=0.4.1-t01';
+import { showClientView, hideClientView } from './client-view.js?v=0.4.1-t01';
 
 const loginScreen = document.getElementById('loginScreen');
 const changePasswordScreen = document.getElementById('changePasswordScreen');
@@ -100,6 +101,7 @@ onAuthStateChanged(auth, async (user) => {
     changePasswordError.textContent = '';
     changePasswordSuccess.textContent = '';
     hideCasesScreen();
+    hideClientView();
     currentProfile = null;
     return;
   }
@@ -114,6 +116,7 @@ onAuthStateChanged(auth, async (user) => {
     greeting.classList.add('hidden');
     adminScreen.classList.add('hidden');
     hideCasesScreen();
+    hideClientView();
     currentProfile = null;
     return;
   }
@@ -133,10 +136,18 @@ onAuthStateChanged(auth, async (user) => {
   // Cases screen is for the working lab team, not admin -- admin's role
   // this iteration is purely user management (2026-09-18, at the user's
   // request; TASK.md had originally allowed admin case access "for
-  // testing purposes", but that's been narrowed back down deliberately).
+  // testing purposes", but that's been narrowed back down deliberately;
+  // 0.4.1 made this exclusion a real rules-level lockout too, not just
+  // this UI gate -- see setup/firestore.rules). 0.4.1 also adds a real
+  // client-facing view, routed here by role.
   if (['team_leader', 'worker'].includes(profile.role)) {
+    hideClientView();
     showCasesScreen(currentProfile);
+  } else if (profile.role === 'client') {
+    hideCasesScreen();
+    showClientView(currentProfile);
   } else {
     hideCasesScreen();
+    hideClientView();
   }
 });
