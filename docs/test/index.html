@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Smart Lab (Test)</title>
-<link rel="icon" type="image/svg+xml" href="icon.svg?v=0.4.0-t03">
+<link rel="icon" type="image/svg+xml" href="icon.svg?v=0.4.0-t04">
 <meta name="theme-color" content="#141a1f">
 <style>
   :root{
@@ -53,22 +53,6 @@
   .muted{color:var(--text-dim); font-size:13px;}
 
   #loginScreen.card{margin:auto;}
-
-  #adminScreen .status-toggle{
-    position:relative; display:flex; width:220px; margin-top:16px;
-    background:var(--panel2); border:1px solid var(--border); border-radius:8px; padding:2px;
-  }
-  #adminScreen .status-toggle button{
-    flex:1; position:relative; z-index:1; background:transparent; border:none;
-    color:var(--text-dim); font:inherit; font-size:13px; padding:7px 0; cursor:pointer;
-    border-radius:6px; transition:color .2s ease;
-  }
-  #adminScreen .status-toggle button.active{color:var(--accent-text);}
-  #adminScreen .status-toggle .thumb{
-    position:absolute; top:2px; left:2px; width:calc(50% - 2px); height:calc(100% - 4px);
-    background:var(--accent); border-radius:6px; transition:transform .2s ease;
-  }
-  #adminScreen .status-toggle.is-disabled .thumb{transform:translateX(100%);}
 
   #adminScreen{max-width:560px; width:100%; margin:0 auto;}
   #adminScreen .add-row{display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end;}
@@ -132,7 +116,7 @@
 </div>
 
 <header>
-  <h1><img src="icon.svg?v=0.4.0-t03" alt="">smart-lab</h1>
+  <h1><img src="icon.svg?v=0.4.0-t04" alt="">smart-lab</h1>
   <span class="badge" id="versionBadge"></span>
   <span class="greeting hidden" id="greeting"></span>
   <button class="btn btn-small hidden" id="showChangePasswordBtn">Change password</button>
@@ -201,11 +185,6 @@
       </div>
       <div class="error" id="addUserError"></div>
     </form>
-    <div class="status-toggle" id="statusToggle">
-      <div class="thumb"></div>
-      <button type="button" class="active" data-filter="active">Active</button>
-      <button type="button" data-filter="disabled">Non-active</button>
-    </div>
     <table class="user-list">
       <thead>
         <tr><th>Username</th><th>Role</th><th>Status</th><th></th></tr>

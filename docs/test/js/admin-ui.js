@@ -15,20 +15,8 @@ const addUserBtn = document.getElementById('addUserBtn');
 const addUserError = document.getElementById('addUserError');
 const newRoleSelect = document.getElementById('newRole');
 const userListBody = document.getElementById('userListBody');
-const statusToggle = document.getElementById('statusToggle');
-const filterButtons = statusToggle.querySelectorAll('button');
 
 let allUsers = [];
-let userListFilter = 'active';
-
-filterButtons.forEach((btn) => {
-  btn.addEventListener('click', () => {
-    userListFilter = btn.dataset.filter;
-    filterButtons.forEach((b) => b.classList.toggle('active', b === btn));
-    statusToggle.classList.toggle('is-disabled', userListFilter === 'disabled');
-    renderUserList();
-  });
-});
 
 addUserForm.addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -65,17 +53,17 @@ export async function loadUserList() {
   renderUserList();
 }
 
-// Active users only by default -- the "Disabled" toggle swaps the view
-// rather than showing both at once, so a growing disabled list doesn't
-// clutter the common case.
+// No active/disabled filter anymore (removed 2026-09-18) -- now that
+// delete actually removes an unwanted account instead of just disabling
+// it, there's no growing disabled-list clutter to filter away. Shows
+// everyone, active or disabled, in one list.
 function renderUserList() {
-  const rows = allUsers.filter((u) => u.status === userListFilter);
   userListBody.innerHTML = '';
-  if (rows.length === 0) {
-    userListBody.innerHTML = `<tr><td colspan="4" class="muted">No ${userListFilter} users.</td></tr>`;
+  if (allUsers.length === 0) {
+    userListBody.innerHTML = '<tr><td colspan="4" class="muted">No users yet.</td></tr>';
     return;
   }
-  rows.forEach((u) => userListBody.appendChild(renderUserRow(u)));
+  allUsers.forEach((u) => userListBody.appendChild(renderUserRow(u)));
 }
 
 function renderUserRow(u) {
@@ -114,10 +102,7 @@ function renderUserRow(u) {
       await updateDoc(doc(db, 'users', u.uid), { [field]: value });
     }
     roleSelect.addEventListener('change', () => saveField('role', roleSelect.value));
-    statusSelect.addEventListener('change', async () => {
-      await saveField('status', statusSelect.value);
-      loadUserList(); // changing status may move this row out of the current filter
-    });
+    statusSelect.addEventListener('change', () => saveField('status', statusSelect.value));
 
     roleTd = document.createElement('td'); roleTd.appendChild(roleSelect);
     statusTd = document.createElement('td'); statusTd.appendChild(statusSelect);
