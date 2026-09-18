@@ -1,4 +1,4 @@
-import { db, USERNAME_DOMAIN, createAuthAccountWithoutSigningOut } from './firebase-init.js?v=0.4.0-t09';
+import { db, USERNAME_DOMAIN, createAuthAccountWithoutSigningOut } from './firebase-init.js?v=0.4.0-t10';
 import {
   doc, setDoc, updateDoc, deleteDoc, collection, getDocs
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
