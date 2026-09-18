@@ -4,12 +4,17 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 
 // ---------------------------------------------------------------------
-// Admin: add user + edit role + reissue password.
+// Admin: add user + edit role + reset another user's password.
 // Convenience-only gating here (hide the screen) -- the actual protection
 // is the isAdmin() check in setup/firestore.rules.
 // Verifier is intentionally not modeled here -- stripped for now, coming
 // back later in a different shape. Status is gone too (2026-09-18) --
-// delete now covers what "disabled" used to be for, see reissueUser.
+// delete now covers what "disabled" used to be for, see resetUserPassword.
+// "Reset password" here is user-facing wording for what SPEC.md calls
+// "reissue" -- neither admin's own row nor a plain self-service password
+// change (see auth-ui.js) need this; it's specifically for setting
+// *someone else's* password (2026-09-18: stripped from admin's own row --
+// admin can just use the ordinary "Change password" button for itself).
 // ---------------------------------------------------------------------
 const addUserForm = document.getElementById('addUserForm');
 const addUserBtn = document.getElementById('addUserBtn');
@@ -90,17 +95,20 @@ function renderUserRow(u) {
     roleTd = document.createElement('td'); roleTd.appendChild(roleSelect);
   }
 
+  // Neither action applies to admin's own row: it has no password-reset
+  // path here since admin can just use its own "Change password" button
+  // (see auth-ui.js), and it's already established elsewhere that admin
+  // has no delete/edit controls on itself either.
   const actionTd = document.createElement('td');
-  const reissueBtn = document.createElement('button');
-  reissueBtn.type = 'button';
-  reissueBtn.className = 'btn btn-small';
-  reissueBtn.textContent = 'Reissue';
-  actionTd.appendChild(reissueBtn);
-
-  // Admin can delete a user's profile (2026-09-18) -- not offered on the
-  // admin's own row, same as the other edit controls above.
+  let resetPasswordBtn = null;
   let deleteBtn = null;
   if (u.role !== 'admin') {
+    resetPasswordBtn = document.createElement('button');
+    resetPasswordBtn.type = 'button';
+    resetPasswordBtn.className = 'btn btn-small';
+    resetPasswordBtn.textContent = 'Reset password';
+    actionTd.appendChild(resetPasswordBtn);
+
     deleteBtn = document.createElement('button');
     deleteBtn.type = 'button';
     deleteBtn.className = 'btn btn-small';
@@ -113,7 +121,7 @@ function renderUserRow(u) {
   tr.appendChild(roleTd);
   tr.appendChild(actionTd);
 
-  // Shared by Reissue and Delete -- only one inline sub-row open at a time.
+  // Shared by Reset password and Delete -- only one inline sub-row open at a time.
   function openInlineRow(build) {
     if (tr.nextElementSibling && tr.nextElementSibling.classList.contains('inline-action-row')) return;
     const inlineTr = document.createElement('tr');
@@ -125,31 +133,33 @@ function renderUserRow(u) {
     tr.after(inlineTr);
   }
 
-  reissueBtn.addEventListener('click', () => {
-    openInlineRow((td, close) => {
-      const input = document.createElement('input');
-      input.type = 'password';
-      input.placeholder = 'New password';
-      const confirmBtn = document.createElement('button');
-      confirmBtn.type = 'button';
-      confirmBtn.className = 'btn btn-small btn-primary';
-      confirmBtn.textContent = 'Confirm';
-      confirmBtn.style.marginLeft = '8px';
-      const cancelBtn = document.createElement('button');
-      cancelBtn.type = 'button';
-      cancelBtn.className = 'btn btn-small';
-      cancelBtn.textContent = 'Cancel';
-      cancelBtn.style.marginLeft = '8px';
-      const errSpan = document.createElement('span');
-      errSpan.className = 'error';
-      errSpan.style.marginLeft = '8px';
+  if (resetPasswordBtn) {
+    resetPasswordBtn.addEventListener('click', () => {
+      openInlineRow((td, close) => {
+        const input = document.createElement('input');
+        input.type = 'password';
+        input.placeholder = 'New password';
+        const confirmBtn = document.createElement('button');
+        confirmBtn.type = 'button';
+        confirmBtn.className = 'btn btn-small btn-primary';
+        confirmBtn.textContent = 'Confirm';
+        confirmBtn.style.marginLeft = '8px';
+        const cancelBtn = document.createElement('button');
+        cancelBtn.type = 'button';
+        cancelBtn.className = 'btn btn-small';
+        cancelBtn.textContent = 'Cancel';
+        cancelBtn.style.marginLeft = '8px';
+        const errSpan = document.createElement('span');
+        errSpan.className = 'error';
+        errSpan.style.marginLeft = '8px';
 
-      cancelBtn.addEventListener('click', close);
-      confirmBtn.addEventListener('click', () => reissueUser(u, input.value, errSpan, confirmBtn));
+        cancelBtn.addEventListener('click', close);
+        confirmBtn.addEventListener('click', () => resetUserPassword(u, input.value, errSpan, confirmBtn));
 
-      td.append(input, confirmBtn, cancelBtn, errSpan);
+        td.append(input, confirmBtn, cancelBtn, errSpan);
+      });
     });
-  });
+  }
 
   if (deleteBtn) {
     deleteBtn.addEventListener('click', () => {
@@ -198,19 +208,20 @@ function renderUserRow(u) {
 }
 
 // ---------------------------------------------------------------------
-// Reissue. Not a true Admin-SDK password reset (still needs Blaze) --
-// creates a brand-new Auth account under a disambiguated email, copies
-// the profile over, repoints usernames/{username} at the new account,
-// and deletes the old account's profile doc (2026-09-18: previously just
-// disabled it and left it sitting there; the user asked for it to be
-// cleaned up automatically instead). This does NOT delete the old
-// account's underlying Firebase Auth credential -- that still isn't
-// possible client-side without the Admin SDK (Blaze) -- but with its
-// profile doc gone, every rule in setup/firestore.rules denies it, so
-// it's a real, immediate lockout, not just a UI-hidden one. Net effect
-// for the user: same username, new password, everything else unchanged.
+// Reset another user's password ("reissue" in SPEC.md's terminology).
+// Not a true Admin-SDK password reset (still needs Blaze) -- creates a
+// brand-new Auth account under a disambiguated email, copies the profile
+// over, repoints usernames/{username} at the new account, and deletes
+// the old account's profile doc (2026-09-18: previously just disabled it
+// and left it sitting there; the user asked for it to be cleaned up
+// automatically instead). This does NOT delete the old account's
+// underlying Firebase Auth credential -- that still isn't possible
+// client-side without the Admin SDK (Blaze) -- but with its profile doc
+// gone, every rule in setup/firestore.rules denies it, so it's a real,
+// immediate lockout, not just a UI-hidden one. Net effect for the user:
+// same username, new password, everything else unchanged.
 // ---------------------------------------------------------------------
-async function reissueUser(u, newPassword, errSpan, confirmBtn) {
+async function resetUserPassword(u, newPassword, errSpan, confirmBtn) {
   if (!newPassword) { errSpan.textContent = 'Enter a password.'; return; }
   confirmBtn.disabled = true;
   errSpan.textContent = '';
