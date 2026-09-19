@@ -1,12 +1,12 @@
-import { db } from './firebase-init.js?v=0.4.1-t07';
+import { db } from './firebase-init.js?v=0.4.1-t08';
 import {
   collection, doc, getDoc, getDocs, addDoc, updateDoc, deleteDoc, query, where, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { loadCaseTypes, getCachedCaseTypes, findCaseTypeById } from './case-types-ui.js?v=0.4.1-t07';
+import { loadCaseTypes, getCachedCaseTypes, findCaseTypeById } from './case-types-ui.js?v=0.4.1-t08';
 import {
   loadClientOrgsAndClients, getCachedClientOrgs, getCachedClientsForOrg, fetchClientsForOrg,
   findClientById, findClientOrgById
-} from './clients-ui.js?v=0.4.1-t07';
+} from './clients-ui.js?v=0.4.1-t08';
 
 // ---------------------------------------------------------------------
 // Core case/sample/action model (0.4.1 redesign -- see SPEC.md's "Case
@@ -306,8 +306,8 @@ function buildTypeCard(group) {
 }
 
 // Two-line row: top is the numbered oname (case# - client case# - name),
-// bottom splits day-count/due-date (stacked, left) from stage/case
-// manager (right) -- replaces the old single pipe-delimited line.
+// bottom splits worker/day-count/due-date (left) from stage (right) --
+// replaces the old single pipe-delimited line.
 function renderCaseRow(c, number) {
   const row = document.createElement('div');
   row.className = 'case-row-item';
@@ -327,21 +327,16 @@ function renderCaseRow(c, number) {
   const bottom = document.createElement('div');
   bottom.className = 'case-row-bottom';
 
-  const dayDate = document.createElement('div');
-  dayDate.className = 'case-row-daydate';
   const dc = dayCounterOf(c);
-  const dayLine = document.createElement('span');
-  dayLine.textContent = dc == null ? '—' : `day ${dc}`;
-  const dueLine = document.createElement('span');
-  dueLine.className = 'version-sub';
-  dueLine.textContent = dueDateOf(c) || '—';
-  dayDate.append(dayLine, dueLine);
+  const meta = document.createElement('div');
+  meta.className = 'case-row-meta';
+  meta.textContent = `${c.caseManager || 'Unassigned'} | ${dc == null ? '—' : `day ${dc}`} | ${dueDateOf(c) || '—'}`;
 
   const status = document.createElement('div');
   status.className = 'case-row-status';
-  status.textContent = `${stageLabel(c.stage)} | ${c.caseManager || 'Unassigned'}`;
+  status.textContent = stageLabel(c.stage);
 
-  bottom.append(dayDate, status);
+  bottom.append(meta, status);
   row.append(top, bottom);
   row.addEventListener('click', () => openCaseDetail(c.id));
   return row;
