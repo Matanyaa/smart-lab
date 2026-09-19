@@ -1,12 +1,12 @@
-import { db } from './firebase-init.js?v=0.4.1-t04';
+import { db } from './firebase-init.js?v=0.4.1-t05';
 import {
   collection, doc, getDoc, getDocs, addDoc, updateDoc, deleteDoc, query, where, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { loadCaseTypes, getCachedCaseTypes, findCaseTypeById } from './case-types-ui.js?v=0.4.1-t04';
+import { loadCaseTypes, getCachedCaseTypes, findCaseTypeById } from './case-types-ui.js?v=0.4.1-t05';
 import {
   loadClientOrgsAndClients, getCachedClientOrgs, getCachedClientsForOrg, fetchClientsForOrg,
   findClientById, findClientOrgById
-} from './clients-ui.js?v=0.4.1-t04';
+} from './clients-ui.js?v=0.4.1-t05';
 
 // ---------------------------------------------------------------------
 // Core case/sample/action model (0.4.1 redesign -- see SPEC.md's "Case
