@@ -1,30 +1,46 @@
-import { auth, db, USERNAME_DOMAIN } from './firebase-init.js?v=0.4.1-t01';
+import { auth, db, USERNAME_DOMAIN } from './firebase-init.js?v=0.4.1-t02';
 import {
   signInWithEmailAndPassword, signOut, onAuthStateChanged,
   updatePassword, reauthenticateWithCredential, EmailAuthProvider
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
 import { doc, getDoc } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { loadUserList } from './admin-ui.js?v=0.4.1-t01';
-import { showCasesScreen, hideCasesScreen } from './cases.js?v=0.4.1-t01';
-import { showClientView, hideClientView } from './client-view.js?v=0.4.1-t01';
+import { loadUserList } from './admin-ui.js?v=0.4.1-t02';
+import { showCasesScreen, hideCasesScreen } from './cases.js?v=0.4.1-t02';
+import { showClientView, hideClientView } from './client-view.js?v=0.4.1-t02';
 
 const loginScreen = document.getElementById('loginScreen');
-const changePasswordScreen = document.getElementById('changePasswordScreen');
+const settingsScreen = document.getElementById('settingsScreen');
 const adminScreen = document.getElementById('adminScreen');
 const loginForm = document.getElementById('loginForm');
 const loginBtn = document.getElementById('loginBtn');
 const loginError = document.getElementById('loginError');
 const greeting = document.getElementById('greeting');
 const logoutBtn = document.getElementById('logoutBtn');
-const showChangePasswordBtn = document.getElementById('showChangePasswordBtn');
+const settingsBtn = document.getElementById('settingsBtn');
 const changePasswordForm = document.getElementById('changePasswordForm');
 const changePasswordError = document.getElementById('changePasswordError');
 const changePasswordSuccess = document.getElementById('changePasswordSuccess');
+const headerLogo = document.getElementById('headerLogo');
 
 let currentProfile = null; // { uid, username, role }
 
-showChangePasswordBtn.addEventListener('click', () => {
-  changePasswordScreen.classList.toggle('hidden');
+settingsBtn.addEventListener('click', () => {
+  settingsScreen.classList.toggle('hidden');
+});
+
+// Jump from docs/test/ to the launched app at docs/ -- a deliberate
+// non-primary gesture (right-click on desktop, long-press on phone) so
+// it's never triggered by an ordinary tap/click on the logo.
+headerLogo.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  location.href = '../';
+});
+let logoPressTimer = null;
+headerLogo.addEventListener('touchstart', () => {
+  logoPressTimer = setTimeout(() => { location.href = '../'; }, 600);
+});
+['touchend', 'touchmove', 'touchcancel'].forEach((evt) => {
+  headerLogo.addEventListener(evt, () => clearTimeout(logoPressTimer));
 });
 
 // Self-service password change for the currently signed-in account.
@@ -75,17 +91,17 @@ loginForm.addEventListener('submit', async (e) => {
 
 logoutBtn.addEventListener('click', () => signOut(auth));
 
-// Admin's username and role are effectively the same word ("Hello admin —
-// admin" reads as redundant), so admin gets just the name; every other
-// role keeps the full "Hello {username} — {role}" form.
+// Admin's username and role are effectively the same word ("admin | admin"
+// reads as redundant), so admin gets just the name; every other role
+// keeps "{username} | {role}".
 function renderGreeting(profile) {
   greeting.textContent = '';
   const nameEl = document.createElement('strong');
   nameEl.textContent = profile.username;
   if (profile.role === 'admin') {
-    greeting.append('Hello ', nameEl);
+    greeting.append(nameEl);
   } else {
-    greeting.append('Hello ', nameEl, ` — ${profile.role}`);
+    greeting.append(nameEl, ` | ${profile.role}`);
   }
 }
 
@@ -94,9 +110,9 @@ onAuthStateChanged(auth, async (user) => {
     adminScreen.classList.add('hidden');
     greeting.classList.add('hidden');
     logoutBtn.classList.add('hidden');
-    showChangePasswordBtn.classList.add('hidden');
+    settingsBtn.classList.add('hidden');
     loginScreen.classList.remove('hidden');
-    changePasswordScreen.classList.add('hidden');
+    settingsScreen.classList.add('hidden');
     changePasswordForm.reset();
     changePasswordError.textContent = '';
     changePasswordSuccess.textContent = '';
@@ -108,7 +124,7 @@ onAuthStateChanged(auth, async (user) => {
 
   loginScreen.classList.add('hidden');
   logoutBtn.classList.remove('hidden');
-  showChangePasswordBtn.classList.remove('hidden');
+  settingsBtn.classList.remove('hidden');
   loginForm.reset();
 
   const profileSnap = await getDoc(doc(db, 'users', user.uid));

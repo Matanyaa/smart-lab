@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Smart Lab (Test)</title>
-<link rel="icon" type="image/svg+xml" href="icon.svg?v=0.4.1-t01">
+<link rel="icon" type="image/svg+xml" href="icon.svg?v=0.4.1-t02">
 <meta name="theme-color" content="#141a1f">
 <style>
   :root{
@@ -39,12 +39,21 @@
     display:flex; align-items:center; gap:10px; padding:10px 16px;
     border-bottom:1px solid var(--border-soft); background:var(--panel);
   }
-  header h1{font-size:16px; margin:0; font-weight:700; display:flex; align-items:center; gap:8px;}
-  header h1 img{width:22px; height:22px; display:block;}
+  .brand-block{display:flex; flex-direction:column; -webkit-user-select:none; user-select:none;}
+  .brand-block h1{font-size:16px; margin:0; font-weight:700; display:flex; align-items:center; gap:8px;}
+  .brand-block h1 img{width:22px; height:22px; display:block;}
+  .version-sub{font-size:10px; color:var(--text-mute); line-height:1.3; margin-left:30px;}
   .badge{display:inline-block; padding:1px 8px; border-radius:10px; background:var(--panel2); border:1px solid var(--border); font-size:11px; color:var(--text-dim);}
   .greeting{font-size:13px; color:var(--text-dim);}
   .greeting strong{color:var(--text); font-weight:600;}
-  #showChangePasswordBtn{margin-left:auto;}
+  .header-actions{display:flex; gap:8px; margin-left:auto;}
+  .icon-btn{
+    display:inline-flex; align-items:center; justify-content:center;
+    width:38px; height:38px; padding:0; flex-shrink:0;
+    background:var(--panel2); color:var(--text); border:1px solid var(--border); border-radius:8px; cursor:pointer;
+  }
+  .icon-btn:hover{border-color:var(--accent-dim);}
+  .icon-btn svg{width:18px; height:18px;}
 
   main{min-height:calc(100vh - 45px); display:flex; flex-direction:column; align-items:center; padding:24px; gap:20px;}
   .card{background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:32px 28px; max-width:360px; width:100%; margin:auto;}
@@ -136,11 +145,26 @@
 </div>
 
 <header>
-  <h1><img src="icon.svg?v=0.4.1-t01" alt="">smart-lab</h1>
-  <span class="badge" id="versionBadge"></span>
+  <div class="brand-block" id="headerLogo">
+    <h1><img src="icon.svg?v=0.4.1-t02" alt="">smart-lab</h1>
+    <span class="version-sub" id="versionBadge"></span>
+  </div>
   <span class="greeting hidden" id="greeting"></span>
-  <button class="btn btn-small hidden" id="showChangePasswordBtn">Change password</button>
-  <button class="btn btn-small hidden" id="logoutBtn">Log out</button>
+  <div class="header-actions">
+    <button type="button" class="icon-btn hidden" id="settingsBtn" title="Settings" aria-label="Settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"></circle>
+        <path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"></path>
+      </svg>
+    </button>
+    <button type="button" class="icon-btn hidden" id="logoutBtn" title="Log out" aria-label="Log out">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+        <path d="M16 17l5-5-5-5"></path>
+        <path d="M21 12H9"></path>
+      </svg>
+    </button>
+  </div>
 </header>
 
 <main>
@@ -161,8 +185,9 @@
     </form>
   </div>
 
-  <div id="changePasswordScreen" class="card hidden">
-    <h2>Change password</h2>
+  <div id="settingsScreen" class="card hidden">
+    <h2>Settings</h2>
+    <h3 style="margin:0 0 12px; font-size:14px; color:var(--text-dim); font-weight:600;">Change password</h3>
     <form id="changePasswordForm">
       <div class="field">
         <label for="currentPassword">Current password</label>
@@ -357,13 +382,13 @@
   </div>
 </div>
 
-<script type="module" src="js/auth-ui.js?v=0.4.1-t01"></script>
-<script type="module" src="js/admin-ui.js?v=0.4.1-t01"></script>
-<script type="module" src="js/case-types-ui.js?v=0.4.1-t01"></script>
-<script type="module" src="js/clients-ui.js?v=0.4.1-t01"></script>
-<script type="module" src="js/cases.js?v=0.4.1-t01"></script>
-<script type="module" src="js/client-view.js?v=0.4.1-t01"></script>
-<script type="module" src="js/update-banner.js?v=0.4.1-t01"></script>
-<script type="module" src="js/changelog.js?v=0.4.1-t01"></script>
+<script type="module" src="js/auth-ui.js?v=0.4.1-t02"></script>
+<script type="module" src="js/admin-ui.js?v=0.4.1-t02"></script>
+<script type="module" src="js/case-types-ui.js?v=0.4.1-t02"></script>
+<script type="module" src="js/clients-ui.js?v=0.4.1-t02"></script>
+<script type="module" src="js/cases.js?v=0.4.1-t02"></script>
+<script type="module" src="js/client-view.js?v=0.4.1-t02"></script>
+<script type="module" src="js/update-banner.js?v=0.4.1-t02"></script>
+<script type="module" src="js/changelog.js?v=0.4.1-t02"></script>
 </body>
 </html>
