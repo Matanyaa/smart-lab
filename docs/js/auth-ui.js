@@ -1,12 +1,12 @@
-import { auth, db, USERNAME_DOMAIN } from './firebase-init.js?v=0.4.1';
+import { auth, db, USERNAME_DOMAIN } from './firebase-init.js?v=0.4.2';
 import {
   signInWithEmailAndPassword, signOut, onAuthStateChanged,
   updatePassword, reauthenticateWithCredential, EmailAuthProvider
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
 import { doc, getDoc } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { loadUserList } from './admin-ui.js?v=0.4.1';
-import { showCasesScreen, hideCasesScreen } from './cases.js?v=0.4.1';
-import { showClientView, hideClientView } from './client-view.js?v=0.4.1';
+import { loadUserList } from './admin-ui.js?v=0.4.2';
+import { showCasesScreen, hideCasesScreen } from './cases.js?v=0.4.2';
+import { showClientView, hideClientView } from './client-view.js?v=0.4.2';
 
 const loginScreen = document.getElementById('loginScreen');
 const settingsScreen = document.getElementById('settingsScreen');
@@ -20,11 +20,27 @@ const settingsBtn = document.getElementById('settingsBtn');
 const changePasswordForm = document.getElementById('changePasswordForm');
 const changePasswordError = document.getElementById('changePasswordError');
 const changePasswordSuccess = document.getElementById('changePasswordSuccess');
+const headerLogo = document.getElementById('headerLogo');
 
 let currentProfile = null; // { uid, username, role }
 
 settingsBtn.addEventListener('click', () => {
   settingsScreen.classList.toggle('hidden');
+});
+
+// Jump from the launched app to docs/test/ -- the reverse of docs/test/'s
+// own logo gesture (right-click on desktop, long-press on phone), same
+// non-primary-gesture reasoning: never triggered by an ordinary tap/click.
+headerLogo.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  location.href = './test/';
+});
+let logoPressTimer = null;
+headerLogo.addEventListener('touchstart', () => {
+  logoPressTimer = setTimeout(() => { location.href = './test/'; }, 600);
+});
+['touchend', 'touchmove', 'touchcancel'].forEach((evt) => {
+  headerLogo.addEventListener(evt, () => clearTimeout(logoPressTimer));
 });
 
 // Self-service password change for the currently signed-in account.

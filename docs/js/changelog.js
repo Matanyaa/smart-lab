@@ -1,4 +1,4 @@
-import { APP_VERSION } from './firebase-init.js?v=0.4.1';
+import { APP_VERSION } from './firebase-init.js?v=0.4.2';
 
 // Plain-language, user-facing history -- distinct from SPEC.md's Decisions
 // Log (design/build rationale) and HANDOFF.md (Claude Code's build notes).
@@ -22,7 +22,7 @@ const CHANGELOG = [
     ]
   },
   {
-    version: '0.4.1',
+    version: '0.4.2',
     date: '2026-09-18',
     notes: [
       'Cases now have a Notes tab, and actions can require a second person to verify measurements.',
