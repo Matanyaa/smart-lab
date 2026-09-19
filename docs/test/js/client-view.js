@@ -1,6 +1,6 @@
-import { db } from './firebase-init.js?v=0.4.1-t03';
+import { db } from './firebase-init.js?v=0.4.1-t02';
 import { collection, getDocs, query, where } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { loadClientOrgsAndClients, getCachedClientsForOrg } from './clients-ui.js?v=0.4.1-t03';
+import { loadClientOrgsAndClients, getCachedClientsForOrg } from './clients-ui.js?v=0.4.1-t02';
 
 // ---------------------------------------------------------------------
 // Client-org login case view (0.4.1). Minimal for this pass, per TASK.md
