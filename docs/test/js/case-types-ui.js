@@ -1,4 +1,4 @@
-import { db } from './firebase-init.js?v=0.4.1-t08';
+import { db } from './firebase-init.js?v=0.4.1-t09';
 import {
   doc, setDoc, updateDoc, deleteDoc, collection, getDocs, addDoc
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";

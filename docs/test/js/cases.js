@@ -1,12 +1,12 @@
-import { db } from './firebase-init.js?v=0.4.1-t08';
+import { db } from './firebase-init.js?v=0.4.1-t09';
 import {
   collection, doc, getDoc, getDocs, addDoc, updateDoc, deleteDoc, query, where, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { loadCaseTypes, getCachedCaseTypes, findCaseTypeById } from './case-types-ui.js?v=0.4.1-t08';
+import { loadCaseTypes, getCachedCaseTypes, findCaseTypeById } from './case-types-ui.js?v=0.4.1-t09';
 import {
   loadClientOrgsAndClients, getCachedClientOrgs, getCachedClientsForOrg, fetchClientsForOrg,
   findClientById, findClientOrgById
-} from './clients-ui.js?v=0.4.1-t08';
+} from './clients-ui.js?v=0.4.1-t09';
 
 // ---------------------------------------------------------------------
 // Core case/sample/action model (0.4.1 redesign -- see SPEC.md's "Case
@@ -227,6 +227,17 @@ function dueDateOf(c) {
   d.setDate(d.getDate() + ct.tatGoalDays);
   return d.toISOString().slice(0, 10);
 }
+// On-hold/research act as the status itself (replacing the plain stage
+// name) rather than separate tags -- at the user's request, since a case
+// that's on hold or under research isn't really "in New/Lab/..." in any
+// way worth showing alongside a hold/research flag. High priority doesn't
+// replace the status, just marks it with a star. On hold wins if a case
+// is somehow both on hold and flagged for research, since "on hold" is
+// the more blocking of the two states.
+function effectiveStatusText(c) {
+  const base = c.onHold ? 'On hold' : c.showResearchToClient ? 'Research' : stageLabel(c.stage);
+  return c.highPriority ? `★ ${base}` : base;
+}
 function caseTitle(c) {
   const dc = dayCounterOf(c);
   const parts = [
@@ -234,7 +245,7 @@ function caseTitle(c) {
     c.caseManager || 'Unassigned',
     dc == null ? '—' : `day ${dc}`,
     dueDateOf(c) || '—',
-    stageLabel(c.stage)
+    effectiveStatusText(c)
   ];
   return parts.join(' | ');
 }
@@ -315,14 +326,8 @@ function renderCaseRow(c, number) {
   const top = document.createElement('div');
   top.className = 'case-row-top';
   top.textContent = `${number}. ${onameOf(c) || '(unnamed)'}`;
-  if (c.onHold) {
-    const b = document.createElement('span'); b.className = 'badge badge-onhold'; b.textContent = 'On hold'; b.style.marginLeft = '6px';
-    top.appendChild(b);
-  }
-  if (c.highPriority) {
-    const b = document.createElement('span'); b.className = 'badge badge-priority'; b.textContent = 'Priority'; b.style.marginLeft = '4px';
-    top.appendChild(b);
-  }
+  // On-hold/priority no longer get separate badges here -- they're folded
+  // into the status text on the right instead (see effectiveStatusText()).
 
   const bottom = document.createElement('div');
   bottom.className = 'case-row-bottom';
@@ -334,7 +339,8 @@ function renderCaseRow(c, number) {
 
   const status = document.createElement('div');
   status.className = 'case-row-status';
-  status.textContent = stageLabel(c.stage);
+  if (c.highPriority) status.classList.add('status-priority');
+  status.textContent = effectiveStatusText(c);
 
   bottom.append(meta, status);
   row.append(top, bottom);
@@ -453,29 +459,16 @@ function buildInfoSection(c) {
 
   const canEdit = myProfile.role === 'team_leader' || c.caseManager === myProfile.username;
 
+  // Compact view deliberately minimal: case number/client case number/
+  // name/case manager/due date are all already visible in the case title
+  // above (see caseTitle()), so repeating them here was pure redundancy.
+  // On-hold/research/high-priority no longer show as a separate checklist
+  // either -- they're folded into the status text itself now (see
+  // effectiveStatusText()). Full editing (all fields, all toggles) is
+  // still available via "Edit info" below -- only the read-only summary
+  // shrank, not what's actually editable.
   if (!infoEditMode || !canEdit) {
-    const grid = document.createElement('div');
-    grid.className = 'case-grid';
-    grid.appendChild(infoRow('Case number', c.caseNumber));
-    grid.appendChild(infoRow('Client case number', c.clientCaseNumber));
-    grid.appendChild(infoRow('Name', c.name));
-    grid.appendChild(infoRow('Client', clientDisplayText(c)));
-    grid.appendChild(infoRow('Start date', c.startDate));
-    grid.appendChild(infoRow('Case type', c.caseType ? (findCaseTypeById(c.caseType)?.name) : null));
-    grid.appendChild(infoRow('Case manager', c.caseManager));
-    grid.appendChild(infoRow('Opened by', c.openedBy));
-    grid.appendChild(infoRow('Due date', dueDateOf(c)));
-    section.appendChild(grid);
-
-    const toggles = document.createElement('div');
-    toggles.className = 'case-toggles';
-    [['On hold', c.onHold], ['High priority', c.highPriority], ['Show research to client', c.showResearchToClient]].forEach(([label, val]) => {
-      const span = document.createElement('span');
-      span.className = 'checkbox-inline';
-      span.textContent = `${val ? '✓' : '—'} ${label}`;
-      toggles.appendChild(span);
-    });
-    section.appendChild(toggles);
+    section.appendChild(infoRow('Client', clientDisplayText(c)));
     return section;
   }
 
