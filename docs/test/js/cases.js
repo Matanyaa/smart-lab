@@ -1,12 +1,12 @@
-import { db } from './firebase-init.js?v=0.4.1-t10';
+import { db } from './firebase-init.js?v=0.4.1-t11';
 import {
   collection, doc, getDoc, getDocs, addDoc, updateDoc, deleteDoc, query, where, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { loadCaseTypes, getCachedCaseTypes, findCaseTypeById } from './case-types-ui.js?v=0.4.1-t10';
+import { loadCaseTypes, getCachedCaseTypes, findCaseTypeById } from './case-types-ui.js?v=0.4.1-t11';
 import {
   loadClientOrgsAndClients, getCachedClientOrgs, getCachedClientsForOrg, fetchClientsForOrg,
   findClientById, findClientOrgById
-} from './clients-ui.js?v=0.4.1-t10';
+} from './clients-ui.js?v=0.4.1-t11';
 
 // ---------------------------------------------------------------------
 // Core case/sample/action model (0.4.1 redesign -- see SPEC.md's "Case
@@ -1026,11 +1026,39 @@ function buildSampleCard(c, s) {
 
   if (!expanded) return card;
 
-  if (s.zones && s.zones.length) {
-    const zonesP = document.createElement('p'); zonesP.className = 'muted';
-    zonesP.textContent = 'Zones: ' + s.zones.join(', ');
-    card.appendChild(zonesP);
-  }
+  // Zones display + per-sample add-zone control (0.4.1 follow-up: zones
+  // are set per sample directly, not only at batch-creation time).
+  const zonesRow = document.createElement('div');
+  zonesRow.style.display = 'flex'; zonesRow.style.alignItems = 'center'; zonesRow.style.gap = '8px'; zonesRow.style.flexWrap = 'wrap';
+  const zonesText = document.createElement('span'); zonesText.className = 'muted';
+  zonesText.textContent = s.zones && s.zones.length ? 'Zones: ' + s.zones.join(', ') : 'No zones yet';
+  const addZoneBtn = document.createElement('button');
+  addZoneBtn.type = 'button'; addZoneBtn.className = 'btn btn-small'; addZoneBtn.textContent = '+ Zone';
+  zonesRow.append(zonesText, addZoneBtn);
+  card.appendChild(zonesRow);
+
+  addZoneBtn.addEventListener('click', () => {
+    if (card.querySelector('.add-zone-form')) return;
+    const form = document.createElement('div');
+    form.className = 'add-zone-form';
+    form.style.display = 'flex'; form.style.gap = '6px'; form.style.marginTop = '6px';
+    const input = document.createElement('input'); input.placeholder = 'Zone name';
+    const confirmBtn = document.createElement('button');
+    confirmBtn.type = 'button'; confirmBtn.className = 'btn btn-small btn-primary'; confirmBtn.textContent = 'Add';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button'; cancelBtn.className = 'btn btn-small'; cancelBtn.textContent = 'Cancel';
+    form.append(input, confirmBtn, cancelBtn);
+    zonesRow.after(form);
+    input.focus();
+    cancelBtn.addEventListener('click', () => form.remove());
+    confirmBtn.addEventListener('click', async () => {
+      const zoneName = input.value.trim();
+      if (!zoneName) return;
+      confirmBtn.disabled = true;
+      await updateDoc(doc(db, 'cases', c.id, 'samples', s.id), { zones: [...(s.zones || []), zoneName] });
+      await renderCaseDetail(c.id);
+    });
+  });
 
   s.actions.forEach((a) => card.appendChild(buildActionRow(c, s, a)));
 
@@ -1080,6 +1108,45 @@ function buildSampleCard(c, s) {
     await reopenToLabIfNeeded(c.id);
     await renderCaseDetail(c.id);
   });
+
+  // Delete sample -- team_leader only, matching setup/firestore.rules'
+  // samples delete rule (unchanged from Iteration 4). Cascade-deletes the
+  // sample's own actions first, same reasoning as case deletion: Firestore
+  // doesn't cascade subcollections on its own.
+  if (myProfile.role === 'team_leader') {
+    const deleteWrap = document.createElement('div');
+    deleteWrap.style.marginTop = '12px';
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button'; deleteBtn.className = 'btn btn-small'; deleteBtn.textContent = 'Delete sample';
+    deleteWrap.appendChild(deleteBtn);
+
+    deleteBtn.addEventListener('click', () => {
+      if (deleteWrap.querySelector('.confirm-row')) return;
+      const confirmRow = document.createElement('span');
+      confirmRow.className = 'confirm-row';
+      confirmRow.style.marginLeft = '8px';
+      const msg = document.createElement('span'); msg.className = 'error'; msg.textContent = 'Delete this sample and its actions? ';
+      const confirmBtn = document.createElement('button');
+      confirmBtn.type = 'button'; confirmBtn.className = 'btn btn-small btn-primary'; confirmBtn.textContent = 'Confirm';
+      const cancelBtn = document.createElement('button');
+      cancelBtn.type = 'button'; cancelBtn.className = 'btn btn-small'; cancelBtn.textContent = 'Cancel'; cancelBtn.style.marginLeft = '6px';
+      cancelBtn.addEventListener('click', () => confirmRow.remove());
+      confirmBtn.addEventListener('click', async () => {
+        confirmBtn.disabled = true;
+        const actionsSnap = await getDocs(collection(db, 'cases', c.id, 'samples', s.id, 'actions'));
+        for (const aDoc of actionsSnap.docs) {
+          await deleteDoc(doc(db, 'cases', c.id, 'samples', s.id, 'actions', aDoc.id));
+        }
+        await deleteDoc(doc(db, 'cases', c.id, 'samples', s.id));
+        expandedSamples.delete(s.id);
+        await renderCaseDetail(c.id);
+      });
+      confirmRow.append(msg, confirmBtn, cancelBtn);
+      deleteWrap.appendChild(confirmRow);
+    });
+
+    card.appendChild(deleteWrap);
+  }
 
   return card;
 }
