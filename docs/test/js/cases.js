@@ -1,12 +1,12 @@
-import { db } from './firebase-init.js?v=0.4.1-t09';
+import { db } from './firebase-init.js?v=0.4.1-t10';
 import {
   collection, doc, getDoc, getDocs, addDoc, updateDoc, deleteDoc, query, where, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { loadCaseTypes, getCachedCaseTypes, findCaseTypeById } from './case-types-ui.js?v=0.4.1-t09';
+import { loadCaseTypes, getCachedCaseTypes, findCaseTypeById } from './case-types-ui.js?v=0.4.1-t10';
 import {
   loadClientOrgsAndClients, getCachedClientOrgs, getCachedClientsForOrg, fetchClientsForOrg,
   findClientById, findClientOrgById
-} from './clients-ui.js?v=0.4.1-t09';
+} from './clients-ui.js?v=0.4.1-t10';
 
 // ---------------------------------------------------------------------
 // Core case/sample/action model (0.4.1 redesign -- see SPEC.md's "Case
@@ -876,6 +876,37 @@ function defaultSampleActions(template) {
   }));
 }
 
+// Repeatable named-row editor -- one text input per row, used for both
+// the batch-add view's sample-name list and its zone list. Reuses
+// .value-row's flex/wrap styling (built for the action value editors)
+// since a single-input row fits that layout fine too.
+function buildNameListEditor(addButtonLabel, placeholder) {
+  const wrap = document.createElement('div');
+  const rows = document.createElement('div');
+  wrap.appendChild(rows);
+  function addRow() {
+    const row = document.createElement('div'); row.className = 'value-row';
+    const input = document.createElement('input'); input.placeholder = placeholder;
+    const rm = document.createElement('button'); rm.type = 'button'; rm.className = 'btn btn-small'; rm.textContent = '✕';
+    rm.addEventListener('click', () => row.remove());
+    row.append(input, rm);
+    rows.appendChild(row);
+    input.focus();
+  }
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button'; addBtn.className = 'btn btn-small'; addBtn.textContent = addButtonLabel;
+  addBtn.addEventListener('click', addRow);
+  wrap.appendChild(addBtn);
+  wrap.getValues = () => Array.from(rows.querySelectorAll('input')).map((i) => i.value.trim()).filter(Boolean);
+  return wrap;
+}
+
+// Batch add view (0.4.1 redesign, at the user's request): a toggled panel
+// instead of an always-open inline form. Set an item name and a number of
+// copies; optionally list out specific sample names -- if none are
+// listed, the item itself is treated as a single sample (per copy).
+// Zones are entered via repeatable named rows instead of a comma-
+// separated string.
 function buildSamplesSection(c, samples) {
   const section = document.createElement('div');
   section.className = 'case-section';
@@ -883,36 +914,89 @@ function buildSamplesSection(c, samples) {
   h3.textContent = 'Samples';
   section.appendChild(h3);
 
-  const form = document.createElement('form');
-  form.className = 'add-row';
-  const itemInput = document.createElement('input'); itemInput.placeholder = 'Item (optional)';
-  const nameInput = document.createElement('input'); nameInput.placeholder = 'Sample name'; nameInput.required = true;
-  const zonesInput = document.createElement('input'); zonesInput.placeholder = 'Zones, comma-separated (optional)';
-  [itemInput, nameInput, zonesInput].forEach((el) => {
-    const f = document.createElement('div'); f.className = 'field'; f.appendChild(el); form.appendChild(f);
-  });
-  const addBtn = document.createElement('button');
-  addBtn.type = 'submit'; addBtn.className = 'btn btn-primary'; addBtn.textContent = 'Add sample';
-  form.appendChild(addBtn);
-  section.appendChild(form);
-  const err = document.createElement('div'); err.className = 'error'; section.appendChild(err);
+  const addToggleBtn = document.createElement('button');
+  addToggleBtn.type = 'button';
+  addToggleBtn.className = 'btn btn-primary btn-small';
+  addToggleBtn.textContent = '+ Add';
+  section.appendChild(addToggleBtn);
 
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
+  const addView = document.createElement('div');
+  addView.className = 'add-samples-view hidden';
+
+  const topRow = document.createElement('div'); topRow.className = 'add-row';
+  const itemField = document.createElement('div'); itemField.className = 'field';
+  const itemLabel = document.createElement('label'); itemLabel.textContent = 'Item name';
+  const itemInput = document.createElement('input');
+  itemField.append(itemLabel, itemInput);
+  const copiesField = document.createElement('div'); copiesField.className = 'field';
+  const copiesLabel = document.createElement('label'); copiesLabel.textContent = 'Number of copies';
+  const copiesInput = document.createElement('input');
+  copiesInput.type = 'number'; copiesInput.min = '1'; copiesInput.value = '1';
+  copiesField.append(copiesLabel, copiesInput);
+  topRow.append(itemField, copiesField);
+  addView.appendChild(topRow);
+
+  const samplesLabel = document.createElement('label');
+  samplesLabel.textContent = 'Samples (optional -- leave empty to treat the whole item as one sample)';
+  addView.appendChild(samplesLabel);
+  const sampleListEditor = buildNameListEditor('+ Add sample', 'Sample name');
+  addView.appendChild(sampleListEditor);
+
+  const zonesLabel = document.createElement('label');
+  zonesLabel.textContent = 'Zones (optional)';
+  addView.appendChild(zonesLabel);
+  const zoneListEditor = buildNameListEditor('+ Set zone', 'Zone name');
+  addView.appendChild(zoneListEditor);
+
+  const createBtn = document.createElement('button');
+  createBtn.type = 'button'; createBtn.className = 'btn btn-primary'; createBtn.textContent = 'Create';
+  createBtn.style.marginTop = '10px';
+  addView.appendChild(createBtn);
+  const err = document.createElement('div'); err.className = 'error'; addView.appendChild(err);
+
+  section.appendChild(addView);
+
+  addToggleBtn.addEventListener('click', () => {
+    const willShow = addView.classList.contains('hidden');
+    addView.classList.toggle('hidden');
+    addToggleBtn.textContent = willShow ? '✕ Cancel' : '+ Add';
+    addToggleBtn.classList.toggle('active', willShow);
+  });
+
+  createBtn.addEventListener('click', async () => {
     err.textContent = '';
-    const name = nameInput.value.trim();
-    if (!name) { err.textContent = 'Name is required.'; return; }
-    const item = itemInput.value.trim() || null;
-    const zones = zonesInput.value.trim() ? zonesInput.value.split(',').map((z) => z.trim()).filter(Boolean) : [];
+    const itemName = itemInput.value.trim() || null;
+    const copies = Math.max(1, parseInt(copiesInput.value, 10) || 1);
+    const zones = zoneListEditor.getValues();
+    const sampleNames = sampleListEditor.getValues();
+
+    if (sampleNames.length === 0 && !itemName) {
+      err.textContent = 'Enter an item name, or add at least one sample.';
+      return;
+    }
+
+    createBtn.disabled = true;
     try {
-      const sampleRef = await addDoc(collection(db, 'cases', c.id, 'samples'), { item, name, zones });
-      for (const action of defaultSampleActions(c.labWorkflowTemplate)) {
-        await addDoc(collection(db, 'cases', c.id, 'samples', sampleRef.id, 'actions'), action);
+      // No named samples: the whole item is one sample, not a group of
+      // one -- no separate `item` grouping label makes sense there.
+      const entries = sampleNames.length > 0
+        ? sampleNames.map((name) => ({ item: itemName, name }))
+        : [{ item: null, name: itemName }];
+
+      for (const entry of entries) {
+        for (let n = 1; n <= copies; n++) {
+          const finalName = copies > 1 ? `${entry.name} (${n})` : entry.name;
+          const sampleRef = await addDoc(collection(db, 'cases', c.id, 'samples'), { item: entry.item, name: finalName, zones });
+          for (const action of defaultSampleActions(c.labWorkflowTemplate)) {
+            await addDoc(collection(db, 'cases', c.id, 'samples', sampleRef.id, 'actions'), action);
+          }
+        }
       }
       await reopenToLabIfNeeded(c.id);
       await renderCaseDetail(c.id);
     } catch (ex) {
-      err.textContent = `Couldn't add sample: ${ex.message}`;
+      err.textContent = `Couldn't add sample(s): ${ex.message}`;
+      createBtn.disabled = false;
     }
   });
 
