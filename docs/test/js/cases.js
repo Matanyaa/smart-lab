@@ -1,12 +1,12 @@
-import { db } from './firebase-init.js?v=0.4.1-t06';
+import { db } from './firebase-init.js?v=0.4.1-t07';
 import {
   collection, doc, getDoc, getDocs, addDoc, updateDoc, deleteDoc, query, where, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { loadCaseTypes, getCachedCaseTypes, findCaseTypeById } from './case-types-ui.js?v=0.4.1-t06';
+import { loadCaseTypes, getCachedCaseTypes, findCaseTypeById } from './case-types-ui.js?v=0.4.1-t07';
 import {
   loadClientOrgsAndClients, getCachedClientOrgs, getCachedClientsForOrg, fetchClientsForOrg,
   findClientById, findClientOrgById
-} from './clients-ui.js?v=0.4.1-t06';
+} from './clients-ui.js?v=0.4.1-t07';
 
 // ---------------------------------------------------------------------
 // Core case/sample/action model (0.4.1 redesign -- see SPEC.md's "Case
@@ -17,7 +17,7 @@ import {
 
 const casesScreen = document.getElementById('casesScreen');
 const caseDetailScreen = document.getElementById('caseDetailScreen');
-const caseListBody = document.getElementById('caseListBody');
+const caseTypeGroupsContainer = document.getElementById('caseTypeGroups');
 const showNewCaseFormBtn = document.getElementById('showNewCaseFormBtn');
 const newCaseForm = document.getElementById('newCaseForm');
 const newCaseError = document.getElementById('newCaseError');
@@ -253,7 +253,7 @@ function canUpdateCase(c) {
 }
 
 async function loadCaseList() {
-  caseListBody.innerHTML = '<tr><td colspan="2" class="muted">Loading…</td></tr>';
+  caseTypeGroupsContainer.innerHTML = '<p class="muted">Loading…</p>';
   const q = myProfile.role === 'team_leader'
     ? query(collection(db, 'cases'), where('openedBy', '==', myProfile.username))
     : collection(db, 'cases');
@@ -261,30 +261,90 @@ async function loadCaseList() {
   cases = [];
   snap.forEach((d) => cases.push({ id: d.id, ...d.data() }));
   cases.sort((a, b) => (a.caseNumber || '').localeCompare(b.caseNumber || ''));
-  caseListBody.innerHTML = '';
-  if (cases.length === 0) {
-    caseListBody.innerHTML = '<tr><td colspan="2" class="muted">No cases yet.</td></tr>';
-    return;
-  }
-  cases.forEach((c) => caseListBody.appendChild(renderCaseRow(c)));
+  renderCaseTypeGroups();
 }
 
-function renderCaseRow(c) {
-  const tr = document.createElement('tr');
-  tr.className = 'case-row';
-  const titleTd = document.createElement('td'); titleTd.textContent = caseTitle(c);
-  const badgeTd = document.createElement('td');
+// Cases screen groups by case type (each type gets its own card, titled
+// with the type's own name instead of a generic "Cases" heading) rather
+// than one flat list -- at the user's request. Cases with no case type
+// set land in their own "No case type" group, sorted last.
+function groupCasesByType(caseList) {
+  const groups = new Map();
+  caseList.forEach((c) => {
+    const key = c.caseType || '__none__';
+    if (!groups.has(key)) {
+      const name = c.caseType ? (findCaseTypeById(c.caseType)?.name || 'Unknown type') : 'No case type';
+      groups.set(key, { name, cases: [] });
+    }
+    groups.get(key).cases.push(c);
+  });
+  return groups;
+}
+
+function renderCaseTypeGroups() {
+  caseTypeGroupsContainer.innerHTML = '';
+  if (cases.length === 0) {
+    caseTypeGroupsContainer.innerHTML = '<p class="muted">No cases yet.</p>';
+    return;
+  }
+  const groups = Array.from(groupCasesByType(cases).values()).sort((a, b) => {
+    if (a.name === 'No case type') return 1;
+    if (b.name === 'No case type') return -1;
+    return a.name.localeCompare(b.name);
+  });
+  groups.forEach((group) => caseTypeGroupsContainer.appendChild(buildTypeCard(group)));
+}
+
+function buildTypeCard(group) {
+  const card = document.createElement('div');
+  card.className = 'card type-card';
+  const h2 = document.createElement('h2');
+  h2.textContent = group.name;
+  card.appendChild(h2);
+  group.cases.forEach((c, idx) => card.appendChild(renderCaseRow(c, idx + 1)));
+  return card;
+}
+
+// Two-line row: top is the numbered oname (case# - client case# - name),
+// bottom splits day-count/due-date (stacked, left) from stage/case
+// manager (right) -- replaces the old single pipe-delimited line.
+function renderCaseRow(c, number) {
+  const row = document.createElement('div');
+  row.className = 'case-row-item';
+
+  const top = document.createElement('div');
+  top.className = 'case-row-top';
+  top.textContent = `${number}. ${onameOf(c) || '(unnamed)'}`;
   if (c.onHold) {
-    const b = document.createElement('span'); b.className = 'badge badge-onhold'; b.textContent = 'On hold';
-    badgeTd.appendChild(b);
+    const b = document.createElement('span'); b.className = 'badge badge-onhold'; b.textContent = 'On hold'; b.style.marginLeft = '6px';
+    top.appendChild(b);
   }
   if (c.highPriority) {
-    const b = document.createElement('span'); b.className = 'badge badge-priority'; b.textContent = 'Priority';
-    badgeTd.appendChild(b);
+    const b = document.createElement('span'); b.className = 'badge badge-priority'; b.textContent = 'Priority'; b.style.marginLeft = '4px';
+    top.appendChild(b);
   }
-  tr.append(titleTd, badgeTd);
-  tr.addEventListener('click', () => openCaseDetail(c.id));
-  return tr;
+
+  const bottom = document.createElement('div');
+  bottom.className = 'case-row-bottom';
+
+  const dayDate = document.createElement('div');
+  dayDate.className = 'case-row-daydate';
+  const dc = dayCounterOf(c);
+  const dayLine = document.createElement('span');
+  dayLine.textContent = dc == null ? '—' : `day ${dc}`;
+  const dueLine = document.createElement('span');
+  dueLine.className = 'version-sub';
+  dueLine.textContent = dueDateOf(c) || '—';
+  dayDate.append(dayLine, dueLine);
+
+  const status = document.createElement('div');
+  status.className = 'case-row-status';
+  status.textContent = `${stageLabel(c.stage)} | ${c.caseManager || 'Unassigned'}`;
+
+  bottom.append(dayDate, status);
+  row.append(top, bottom);
+  row.addEventListener('click', () => openCaseDetail(c.id));
+  return row;
 }
 
 backToCasesBtn.addEventListener('click', () => {
