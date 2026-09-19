@@ -1,12 +1,12 @@
-import { auth, db, USERNAME_DOMAIN } from './firebase-init.js?v=0.4.1-t01';
+import { auth, db, USERNAME_DOMAIN } from './firebase-init.js?v=0.4.1-t02';
 import {
   signInWithEmailAndPassword, signOut, onAuthStateChanged,
   updatePassword, reauthenticateWithCredential, EmailAuthProvider
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
 import { doc, getDoc } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { loadUserList } from './admin-ui.js?v=0.4.1-t01';
-import { showCasesScreen, hideCasesScreen } from './cases.js?v=0.4.1-t01';
-import { showClientView, hideClientView } from './client-view.js?v=0.4.1-t01';
+import { loadUserList } from './admin-ui.js?v=0.4.1-t02';
+import { showCasesScreen, hideCasesScreen } from './cases.js?v=0.4.1-t02';
+import { showClientView, hideClientView } from './client-view.js?v=0.4.1-t02';
 
 const loginScreen = document.getElementById('loginScreen');
 const changePasswordScreen = document.getElementById('changePasswordScreen');

@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Smart Lab (Test)</title>
-<link rel="icon" type="image/svg+xml" href="icon.svg?v=0.4.1-t01">
+<link rel="icon" type="image/svg+xml" href="icon.svg?v=0.4.1-t02">
 <meta name="theme-color" content="#141a1f">
 <style>
   :root{
@@ -14,32 +14,37 @@
     --warn:#d9a441; --err:#d96a4a;
   }
   *{box-sizing:border-box;}
+  html{-webkit-text-size-adjust:100%;}
   body{
     margin:0; background:var(--bg); color:var(--text);
     font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
     font-size:15px; line-height:1.4;
+    overflow-x:hidden;
   }
   a{color:var(--accent);}
   .hidden{display:none !important;}
-  .btn{background:var(--panel2); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:9px 14px; font:inherit; cursor:pointer;}
+  .btn{background:var(--panel2); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:11px 16px; min-height:42px; font:inherit; cursor:pointer;}
   .btn:hover{border-color:var(--accent-dim);}
   .btn:disabled{opacity:0.5; cursor:default;}
   .btn-primary{background:var(--accent); color:var(--accent-text); border-color:var(--accent);}
   .btn-primary:hover{border-color:var(--accent);}
-  .btn-small{padding:4px 9px; font-size:12px; border-radius:6px;}
+  .btn-small{padding:7px 11px; min-height:36px; font-size:12.5px; border-radius:6px;}
   .btn.active{background:var(--accent-dim); border-color:var(--accent); color:var(--text);}
   input, select{
     background:var(--panel2); color:var(--text); border:1px solid var(--border); border-radius:8px;
     padding:10px 12px; font:inherit; width:100%;
+    /* 16px minimum -- anything smaller makes iOS Safari auto-zoom the
+       whole page on focus, which is jarring on a phone-first app. */
+    font-size:16px;
   }
   input:focus, select:focus{outline:none; border-color:var(--accent-dim);}
   label{display:block; font-size:13px; color:var(--text-dim); margin:0 0 6px;}
 
   header{
-    display:flex; align-items:center; gap:10px; padding:10px 16px;
+    display:flex; align-items:center; flex-wrap:wrap; row-gap:8px; gap:10px; padding:10px 16px;
     border-bottom:1px solid var(--border-soft); background:var(--panel);
   }
-  header h1{font-size:16px; margin:0; font-weight:700; display:flex; align-items:center; gap:8px;}
+  header h1{font-size:16px; margin:0; font-weight:700; display:flex; align-items:center; gap:8px; flex-shrink:0;}
   header h1 img{width:22px; height:22px; display:block;}
   .badge{display:inline-block; padding:1px 8px; border-radius:10px; background:var(--panel2); border:1px solid var(--border); font-size:11px; color:var(--text-dim);}
   .greeting{font-size:13px; color:var(--text-dim);}
@@ -48,6 +53,16 @@
 
   main{min-height:calc(100vh - 45px); display:flex; flex-direction:column; align-items:center; padding:24px; gap:20px;}
   .card{background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:32px 28px; max-width:360px; width:100%; margin:auto;}
+  .table-scroll{width:100%; overflow-x:auto; -webkit-overflow-scrolling:touch;}
+
+  @media (max-width: 480px){
+    main{padding:14px; gap:14px;}
+    .card{padding:20px 16px; border-radius:12px;}
+    header{padding:8px 12px;}
+    .greeting{flex-basis:100%; order:3;}
+    #showChangePasswordBtn{margin-left:0;}
+    .add-row .field, #adminScreen .add-row .field{flex-basis:100%;}
+  }
   .card h2{margin:0 0 20px; font-size:20px;}
   .field{margin-bottom:14px;}
   .error{color:var(--err); font-size:13px; margin-top:10px; min-height:16px;}
@@ -111,15 +126,19 @@
   .add-row .field{flex:1; min-width:120px; margin-bottom:0;}
 
   .sample-card{background:var(--panel2); border:1px solid var(--border); border-radius:10px; padding:14px; margin-bottom:12px;}
-  .sample-card-header{display:flex; justify-content:space-between; align-items:center; cursor:pointer;}
+  .sample-card-header{display:flex; justify-content:space-between; align-items:center; cursor:pointer; min-height:36px;}
   .action-row{display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; padding:8px 0; border-bottom:1px solid var(--border-soft); font-size:13px;}
   .action-row:last-child{border-bottom:none;}
-  .execute-form input{width:160px; display:inline-block;}
+  .execute-form input{width:100%; max-width:320px; display:block;}
   #backToCasesBtn{margin-bottom:0;}
 
   .value-list{margin:6px 0;}
-  .value-row{display:flex; gap:6px; margin-bottom:6px;}
-  .value-row input{font-size:12px; padding:6px 8px;}
+  /* Wraps to 2 or 1 per row on a narrow phone instead of squeezing three
+     unlabeled inputs into one line -- no media query needed, flex-wrap
+     plus a min-width on each input handles it. */
+  .value-row{display:flex; flex-wrap:wrap; gap:6px; margin-bottom:6px;}
+  .value-row input{font-size:16px; padding:6px 8px; flex:1 1 90px; min-width:90px;}
+  .value-row button{flex:0 0 auto;}
 
   .note-item{background:var(--panel2); border:1px solid var(--border); border-radius:10px; padding:12px; margin-bottom:10px;}
   .note-item .note-meta{font-size:12px; color:var(--text-dim); margin-bottom:6px;}
@@ -136,7 +155,7 @@
 </div>
 
 <header>
-  <h1><img src="icon.svg?v=0.4.1-t01" alt="">smart-lab</h1>
+  <h1><img src="icon.svg?v=0.4.1-t02" alt="">smart-lab</h1>
   <span class="badge" id="versionBadge"></span>
   <span class="greeting hidden" id="greeting"></span>
   <button class="btn btn-small hidden" id="showChangePasswordBtn">Change password</button>
@@ -216,12 +235,14 @@
         </div>
         <div class="error" id="addUserError"></div>
       </form>
-      <table class="user-list">
-        <thead>
-          <tr><th>Username</th><th>Role</th><th></th></tr>
-        </thead>
-        <tbody id="userListBody"></tbody>
-      </table>
+      <div class="table-scroll">
+        <table class="user-list">
+          <thead>
+            <tr><th>Username</th><th>Role</th><th></th></tr>
+          </thead>
+          <tbody id="userListBody"></tbody>
+        </table>
+      </div>
     </div>
 
     <div id="adminCaseTypesPanel" class="admin-panel hidden">
@@ -243,12 +264,14 @@
         </div>
         <div class="error" id="addCaseTypeError"></div>
       </form>
-      <table class="user-list">
-        <thead>
-          <tr><th>Name</th><th>TAT goal</th><th></th></tr>
-        </thead>
-        <tbody id="caseTypeListBody"></tbody>
-      </table>
+      <div class="table-scroll">
+        <table class="user-list">
+          <thead>
+            <tr><th>Name</th><th>TAT goal</th><th></th></tr>
+          </thead>
+          <tbody id="caseTypeListBody"></tbody>
+        </table>
+      </div>
     </div>
 
     <div id="adminClientsPanel" class="admin-panel hidden">
@@ -317,12 +340,14 @@
       <div class="error" id="newCaseError"></div>
     </form>
 
-    <table class="case-list">
-      <thead>
-        <tr><th>Case</th><th></th></tr>
-      </thead>
-      <tbody id="caseListBody"></tbody>
-    </table>
+    <div class="table-scroll">
+      <table class="case-list">
+        <thead>
+          <tr><th>Case</th><th></th></tr>
+        </thead>
+        <tbody id="caseListBody"></tbody>
+      </table>
+    </div>
   </div>
 
   <div id="caseDetailScreen" class="card hidden">
@@ -341,10 +366,12 @@
       <label for="clientFilterSelect">Filter to a specific client</label>
       <select id="clientFilterSelect"><option value="">All clients</option></select>
     </div>
-    <table class="case-list">
-      <thead><tr><th>Case</th><th></th></tr></thead>
-      <tbody id="clientCaseListBody"></tbody>
-    </table>
+    <div class="table-scroll">
+      <table class="case-list">
+        <thead><tr><th>Case</th><th></th></tr></thead>
+        <tbody id="clientCaseListBody"></tbody>
+      </table>
+    </div>
   </div>
 
 </main>
@@ -357,13 +384,13 @@
   </div>
 </div>
 
-<script type="module" src="js/auth-ui.js?v=0.4.1-t01"></script>
-<script type="module" src="js/admin-ui.js?v=0.4.1-t01"></script>
-<script type="module" src="js/case-types-ui.js?v=0.4.1-t01"></script>
-<script type="module" src="js/clients-ui.js?v=0.4.1-t01"></script>
-<script type="module" src="js/cases.js?v=0.4.1-t01"></script>
-<script type="module" src="js/client-view.js?v=0.4.1-t01"></script>
-<script type="module" src="js/update-banner.js?v=0.4.1-t01"></script>
-<script type="module" src="js/changelog.js?v=0.4.1-t01"></script>
+<script type="module" src="js/auth-ui.js?v=0.4.1-t02"></script>
+<script type="module" src="js/admin-ui.js?v=0.4.1-t02"></script>
+<script type="module" src="js/case-types-ui.js?v=0.4.1-t02"></script>
+<script type="module" src="js/clients-ui.js?v=0.4.1-t02"></script>
+<script type="module" src="js/cases.js?v=0.4.1-t02"></script>
+<script type="module" src="js/client-view.js?v=0.4.1-t02"></script>
+<script type="module" src="js/update-banner.js?v=0.4.1-t02"></script>
+<script type="module" src="js/changelog.js?v=0.4.1-t02"></script>
 </body>
 </html>
