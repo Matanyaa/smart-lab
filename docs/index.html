@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Smart Lab</title>
-<link rel="icon" type="image/svg+xml" href="icon.svg?v=0.3.2">
-<link rel="apple-touch-icon" href="icon.svg?v=0.3.2">
+<link rel="icon" type="image/svg+xml" href="icon.svg?v=0.4.1">
+<link rel="apple-touch-icon" href="icon.svg?v=0.4.1">
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#141a1f">
 <style>
@@ -29,6 +29,7 @@
   .btn-primary{background:var(--accent); color:var(--accent-text); border-color:var(--accent);}
   .btn-primary:hover{border-color:var(--accent);}
   .btn-small{padding:4px 9px; font-size:12px; border-radius:6px;}
+  .btn.active{background:var(--accent-dim); border-color:var(--accent); color:var(--text);}
   input, select{
     background:var(--panel2); color:var(--text); border:1px solid var(--border); border-radius:8px;
     padding:10px 12px; font:inherit; width:100%;
@@ -40,12 +41,21 @@
     display:flex; align-items:center; gap:10px; padding:10px 16px;
     border-bottom:1px solid var(--border-soft); background:var(--panel);
   }
-  header h1{font-size:16px; margin:0; font-weight:700; display:flex; align-items:center; gap:8px;}
-  header h1 img{width:22px; height:22px; display:block;}
+  .brand-block{display:flex; flex-direction:column; -webkit-user-select:none; user-select:none;}
+  .brand-block h1{font-size:16px; margin:0; font-weight:700; display:flex; align-items:center; gap:8px;}
+  .brand-block h1 img{width:22px; height:22px; display:block;}
+  .version-sub{font-size:10px; color:var(--text-mute); line-height:1.3; margin-left:30px;}
   .badge{display:inline-block; padding:1px 8px; border-radius:10px; background:var(--panel2); border:1px solid var(--border); font-size:11px; color:var(--text-dim);}
   .greeting{font-size:13px; color:var(--text-dim);}
   .greeting strong{color:var(--text); font-weight:600;}
-  #showChangePasswordBtn{margin-left:auto;}
+  .header-actions{display:flex; gap:8px; margin-left:auto;}
+  .icon-btn{
+    display:inline-flex; align-items:center; justify-content:center;
+    width:38px; height:38px; padding:0; flex-shrink:0;
+    background:var(--panel2); color:var(--text); border:1px solid var(--border); border-radius:8px; cursor:pointer;
+  }
+  .icon-btn:hover{border-color:var(--accent-dim);}
+  .icon-btn svg{width:18px; height:18px;}
 
   main{min-height:calc(100vh - 45px); display:flex; flex-direction:column; align-items:center; padding:24px; gap:20px;}
   .card{background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:32px 28px; max-width:360px; width:100%; margin:auto;}
@@ -56,33 +66,76 @@
 
   #loginScreen.card{margin:auto;}
 
-  #adminScreen .status-toggle{
-    position:relative; display:flex; width:220px; margin-top:16px;
-    background:var(--panel2); border:1px solid var(--border); border-radius:8px; padding:2px;
-  }
-  #adminScreen .status-toggle button{
-    flex:1; position:relative; z-index:1; background:transparent; border:none;
-    color:var(--text-dim); font:inherit; font-size:13px; padding:7px 0; cursor:pointer;
-    border-radius:6px; transition:color .2s ease;
-  }
-  #adminScreen .status-toggle button.active{color:var(--accent-text);}
-  #adminScreen .status-toggle .thumb{
-    position:absolute; top:2px; left:2px; width:calc(50% - 2px); height:calc(100% - 4px);
-    background:var(--accent); border-radius:6px; transition:transform .2s ease;
-  }
-  #adminScreen .status-toggle.is-disabled .thumb{transform:translateX(100%);}
-
-  #adminScreen{max-width:560px; width:100%; margin:0 auto;}
+  #adminScreen{max-width:640px; width:100%; margin:0 auto;}
   #adminScreen .add-row{display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end;}
   #adminScreen .add-row .field{flex:1; min-width:110px; margin-bottom:0;}
+
+  .tabs{display:flex; gap:8px; margin-bottom:18px; border-bottom:1px solid var(--border-soft); padding-bottom:10px;}
+  .tab-btn{background:transparent; border:1px solid var(--border); color:var(--text-dim); border-radius:8px; padding:6px 12px; font:inherit; font-size:13px; cursor:pointer;}
+  .tab-btn.active{background:var(--panel2); color:var(--text); border-color:var(--accent-dim);}
+  .admin-panel h2{font-size:16px; margin:0 0 14px;}
 
   table.user-list{width:100%; border-collapse:collapse; margin-top:10px; font-size:13px;}
   table.user-list th, table.user-list td{padding:8px 6px; border-bottom:1px solid var(--border-soft); text-align:left; vertical-align:middle;}
   table.user-list select{padding:5px 6px; width:auto;}
-  table.user-list .reissue-row input{width:120px; display:inline-block;}
+  table.user-list .inline-action-row input{width:120px; display:inline-block;}
 
   #updateBanner{display:none; align-items:center; gap:10px; padding:8px 14px; background:var(--warn); color:#25200a; font-size:13px;}
   #updateBanner button{border:1px solid #25200a55; background:transparent; color:#25200a; border-radius:6px; padding:4px 10px; font:inherit; cursor:pointer;}
+
+  #versionBadge{cursor:pointer;}
+  .modal-overlay{position:fixed; inset:0; background:rgba(0,0,0,0.55); display:flex; align-items:center; justify-content:center; padding:24px; z-index:100;}
+  #changelogCard{max-width:380px; max-height:80vh; overflow-y:auto;}
+  .changelog-entry{margin-bottom:16px;}
+  .changelog-entry:last-child{margin-bottom:0;}
+  .changelog-version{font-weight:700;}
+  .changelog-date{color:var(--text-dim); font-weight:400; font-size:12px; margin-left:8px;}
+  #changelogList ul{margin:6px 0 0; padding-left:18px;}
+  #changelogList li{margin-bottom:4px; font-size:14px;}
+
+  #casesScreen, #caseDetailScreen, #clientViewScreen{max-width:860px; width:100%; margin:0 auto; text-align:left;}
+  .cases-header{display:flex; align-items:center; justify-content:space-between; margin-bottom:16px;}
+  .cases-header h2{margin:0;}
+  table.case-list{width:100%; border-collapse:collapse; font-size:13px; margin-top:10px;}
+  table.case-list th, table.case-list td{padding:8px 6px; border-bottom:1px solid var(--border-soft); text-align:left; vertical-align:middle;}
+  table.case-list tr.case-row{cursor:pointer;}
+  table.case-list tr.case-row:hover{background:var(--panel2);}
+  .badge-onhold{background:var(--warn); color:#25200a; border:none;}
+  .badge-priority{background:var(--err); color:#2a0e08; border:none; margin-left:4px;}
+
+  .case-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin-bottom:14px;}
+  .case-field{margin-bottom:0;}
+  .case-field label{display:block; font-size:12px; color:var(--text-dim); margin-bottom:4px;}
+  .case-toggles{display:flex; flex-wrap:wrap; gap:16px; margin-top:14px;}
+  .checkbox-inline{display:flex; align-items:center; gap:6px; font-size:13px; cursor:pointer;}
+  .checkbox-inline input{width:auto;}
+  .warn-text{color:var(--warn); font-size:12px; margin-top:4px;}
+
+  .case-detail-header{display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;}
+  .case-title{font-size:15px; margin:0 0 16px; color:var(--text-dim);}
+  .case-title strong{color:var(--text);}
+
+  .case-section{margin-top:24px; padding-top:16px; border-top:1px solid var(--border-soft);}
+  .case-section:first-child{margin-top:0; padding-top:0; border-top:none;}
+  .case-section h3{margin:0 0 12px; font-size:15px; display:flex; align-items:center; gap:10px;}
+  .add-row{display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; margin-top:10px;}
+  .add-row .field{flex:1; min-width:120px; margin-bottom:0;}
+
+  .sample-card{background:var(--panel2); border:1px solid var(--border); border-radius:10px; padding:14px; margin-bottom:12px;}
+  .sample-card-header{display:flex; justify-content:space-between; align-items:center; cursor:pointer;}
+  .action-row{display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; padding:8px 0; border-bottom:1px solid var(--border-soft); font-size:13px;}
+  .action-row:last-child{border-bottom:none;}
+  .execute-form input{width:160px; display:inline-block;}
+  #backToCasesBtn{margin-bottom:0;}
+
+  .value-list{margin:6px 0;}
+  .value-row{display:flex; gap:6px; margin-bottom:6px;}
+  .value-row input{font-size:12px; padding:6px 8px;}
+
+  .note-item{background:var(--panel2); border:1px solid var(--border); border-radius:10px; padding:12px; margin-bottom:10px;}
+  .note-item .note-meta{font-size:12px; color:var(--text-dim); margin-bottom:6px;}
+  .note-item .note-replies{margin-left:20px; margin-top:10px; border-left:2px solid var(--border-soft); padding-left:12px;}
+  .note-category{display:inline-block; padding:1px 7px; border-radius:8px; background:var(--panel); border:1px solid var(--border); font-size:11px; color:var(--text-dim); margin-left:8px;}
 </style>
 </head>
 <body>
@@ -94,11 +147,26 @@
 </div>
 
 <header>
-  <h1><img src="icon.svg?v=0.3.2" alt="">smart-lab</h1>
-  <span class="badge" id="versionBadge"></span>
+  <div class="brand-block" id="headerLogo">
+    <h1><img src="icon.svg?v=0.4.1" alt="">smart-lab</h1>
+    <span class="version-sub" id="versionBadge"></span>
+  </div>
   <span class="greeting hidden" id="greeting"></span>
-  <button class="btn btn-small hidden" id="showChangePasswordBtn">Change password</button>
-  <button class="btn btn-small hidden" id="logoutBtn">Log out</button>
+  <div class="header-actions">
+    <button type="button" class="icon-btn hidden" id="settingsBtn" title="Settings" aria-label="Settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"></circle>
+        <path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"></path>
+      </svg>
+    </button>
+    <button type="button" class="icon-btn hidden" id="logoutBtn" title="Log out" aria-label="Log out">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+        <path d="M16 17l5-5-5-5"></path>
+        <path d="M21 12H9"></path>
+      </svg>
+    </button>
+  </div>
 </header>
 
 <main>
@@ -119,8 +187,9 @@
     </form>
   </div>
 
-  <div id="changePasswordScreen" class="card hidden">
-    <h2>Change password</h2>
+  <div id="settingsScreen" class="card hidden">
+    <h2>Settings</h2>
+    <h3 style="margin:0 0 12px; font-size:14px; color:var(--text-dim); font-weight:600;">Change password</h3>
     <form id="changePasswordForm">
       <div class="field">
         <label for="currentPassword">Current password</label>
@@ -137,434 +206,196 @@
   </div>
 
   <div id="adminScreen" class="card hidden">
-    <h2>Admin — users</h2>
-    <form id="addUserForm">
+    <div class="tabs" id="adminTabs">
+      <button type="button" class="tab-btn active" data-tab="adminUsersPanel">Users</button>
+      <button type="button" class="tab-btn" data-tab="adminCaseTypesPanel">Case types</button>
+      <button type="button" class="tab-btn" data-tab="adminClientsPanel">Clients</button>
+    </div>
+
+    <div id="adminUsersPanel" class="admin-panel">
+      <h2>Users</h2>
+      <form id="addUserForm">
+        <div class="add-row">
+          <div class="field">
+            <label for="newUsername">Username</label>
+            <input type="text" id="newUsername" required>
+          </div>
+          <div class="field">
+            <label for="newPassword">Password</label>
+            <input type="password" id="newPassword" required>
+          </div>
+          <div class="field">
+            <label for="newRole">Role</label>
+            <!-- No "admin" option: there's exactly one admin (this account),
+                 it's not editable through this screen, and there's no second
+                 admin to promote. -->
+            <select id="newRole">
+              <option value="client">Client</option>
+              <option value="team_leader">Team leader</option>
+              <option value="worker">Worker</option>
+            </select>
+          </div>
+          <div class="field" id="newUserClientOrgField" hidden>
+            <label for="newUserClientOrg">Client org</label>
+            <select id="newUserClientOrg"></select>
+          </div>
+          <button type="submit" class="btn btn-primary" id="addUserBtn">Add user</button>
+        </div>
+        <div class="error" id="addUserError"></div>
+      </form>
+      <table class="user-list">
+        <thead>
+          <tr><th>Username</th><th>Role</th><th></th></tr>
+        </thead>
+        <tbody id="userListBody"></tbody>
+      </table>
+    </div>
+
+    <div id="adminCaseTypesPanel" class="admin-panel hidden">
+      <h2>Case types</h2>
+      <form id="addCaseTypeForm">
+        <div class="add-row">
+          <div class="field">
+            <label for="newCaseTypeName">Name</label>
+            <input type="text" id="newCaseTypeName" required>
+          </div>
+          <div class="field">
+            <label for="newCaseTypeTat">TAT goal (days)</label>
+            <input type="number" id="newCaseTypeTat" min="0">
+          </div>
+          <label class="checkbox-inline" style="margin-bottom:10px;">
+            <input type="checkbox" id="newCaseTypeSeedDefault"> Seed default workflow
+          </label>
+          <button type="submit" class="btn btn-primary">Add case type</button>
+        </div>
+        <div class="error" id="addCaseTypeError"></div>
+      </form>
+      <table class="user-list">
+        <thead>
+          <tr><th>Name</th><th>TAT goal</th><th></th></tr>
+        </thead>
+        <tbody id="caseTypeListBody"></tbody>
+      </table>
+    </div>
+
+    <div id="adminClientsPanel" class="admin-panel hidden">
+      <h2>Clients</h2>
+      <form id="addClientOrgForm">
+        <div class="add-row">
+          <div class="field">
+            <label for="newClientOrgName">New client org name</label>
+            <input type="text" id="newClientOrgName" required>
+          </div>
+          <button type="submit" class="btn btn-primary">Add client org</button>
+        </div>
+        <div class="error" id="addClientOrgError"></div>
+      </form>
+      <div id="clientOrgListBody"></div>
+    </div>
+  </div>
+
+  <div id="casesScreen" class="card hidden">
+    <div class="cases-header">
+      <h2>Cases</h2>
+      <button type="button" class="btn btn-primary btn-small hidden" id="showNewCaseFormBtn">+ New case</button>
+    </div>
+
+    <form id="newCaseForm" class="hidden">
       <div class="add-row">
         <div class="field">
-          <label for="newUsername">Username</label>
-          <input type="text" id="newUsername" required>
+          <label for="newCaseNumber">Case number</label>
+          <input type="text" id="newCaseNumber" required>
         </div>
+        <button type="button" class="btn btn-small" id="genTempNumberBtn">Generate temp #</button>
         <div class="field">
-          <label for="newPassword">Password</label>
-          <input type="password" id="newPassword" required>
+          <label for="newClientCaseNumber">Client case number</label>
+          <input type="text" id="newClientCaseNumber">
         </div>
-        <div class="field">
-          <label for="newRole">Role</label>
-          <!-- No "admin" option: there's exactly one admin (this account),
-               it's not editable through this screen, and there's no second
-               admin to promote. -->
-          <select id="newRole">
-            <option value="client">Client</option>
-            <option value="team_leader">Team leader</option>
-            <option value="worker">Worker</option>
-          </select>
-        </div>
-        <button type="submit" class="btn btn-primary" id="addUserBtn">Add user</button>
       </div>
-      <div class="error" id="addUserError"></div>
+      <div class="add-row">
+        <div class="field">
+          <label for="newCaseName">Name</label>
+          <input type="text" id="newCaseName">
+        </div>
+        <div class="field">
+          <label for="newCaseClientOrg">Client org</label>
+          <select id="newCaseClientOrg"><option value="">(none)</option></select>
+        </div>
+        <div class="field">
+          <label for="newCaseClient">Client</label>
+          <select id="newCaseClient"><option value="">(none)</option></select>
+        </div>
+      </div>
+      <div class="add-row">
+        <div class="field">
+          <label for="newCaseStartDate">Start date</label>
+          <input type="date" id="newCaseStartDate">
+        </div>
+        <div class="field">
+          <label for="newCaseType">Case type</label>
+          <select id="newCaseType"><option value="">(none)</option></select>
+        </div>
+        <div class="field">
+          <label for="newCaseManager">Case manager (optional)</label>
+          <select id="newCaseManager"><option value="">Unassigned</option></select>
+        </div>
+      </div>
+      <button type="submit" class="btn btn-primary">Create case</button>
+      <div class="error" id="newCaseError"></div>
     </form>
-    <div class="status-toggle" id="statusToggle">
-      <div class="thumb"></div>
-      <button type="button" class="active" data-filter="active">Active</button>
-      <button type="button" data-filter="disabled">Non-active</button>
-    </div>
-    <table class="user-list">
+
+    <table class="case-list">
       <thead>
-        <tr><th>Username</th><th>Role</th><th>Status</th><th></th></tr>
+        <tr><th>Case</th><th></th></tr>
       </thead>
-      <tbody id="userListBody"></tbody>
+      <tbody id="caseListBody"></tbody>
+    </table>
+  </div>
+
+  <div id="caseDetailScreen" class="card hidden">
+    <div class="case-detail-header">
+      <button type="button" class="btn btn-small" id="backToCasesBtn">&larr; Back to cases</button>
+      <button type="button" class="btn btn-small" id="toggleNotesBtn">Notes</button>
+    </div>
+    <p class="case-title" id="caseDetailTitle"></p>
+    <div id="caseMainView"></div>
+    <div id="caseNotesView" class="hidden"></div>
+  </div>
+
+  <div id="clientViewScreen" class="card hidden">
+    <h2>Cases</h2>
+    <div class="field" id="clientFilterField" hidden>
+      <label for="clientFilterSelect">Filter to a specific client</label>
+      <select id="clientFilterSelect"><option value="">All clients</option></select>
+    </div>
+    <table class="case-list">
+      <thead><tr><th>Case</th><th></th></tr></thead>
+      <tbody id="clientCaseListBody"></tbody>
     </table>
   </div>
 
 </main>
 
-<script type="module">
-import { initializeApp, deleteApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
-import {
-  getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged,
-  updatePassword, reauthenticateWithCredential, EmailAuthProvider
-} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
-import {
-  getFirestore, doc, getDoc, setDoc, updateDoc, collection, getDocs
-} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+<div id="changelogOverlay" class="modal-overlay hidden">
+  <div class="card" id="changelogCard">
+    <h2>What's new</h2>
+    <div id="changelogList"></div>
+    <button type="button" class="btn btn-primary" id="changelogCloseBtn" style="width:100%; margin-top:16px;">Close</button>
+  </div>
+</div>
 
-// NOTE: icon.svg is referenced with a ?v=<version> query string in the
-// <head> links and the header <img> below, to bust the browser's HTTP
-// cache on every deploy (icon color/shape changes were sticking around
-// for up to 10 minutes otherwise, GitHub Pages' Cache-Control). Bump
-// those alongside this constant on every version change.
-const APP_VERSION = '0.3.2';
-document.getElementById('versionBadge').textContent = `v${APP_VERSION}`;
-
-// --- Firebase config ---
-// Safe to keep client-side: Firebase web app config is not a secret key,
-// it's an identifier — access is enforced by Firestore/Auth rules instead.
-const firebaseConfig = {
-  apiKey: "AIzaSyDYCpHcQ640_QXXa9YOVPlh-JdYbXJD40I",
-  authDomain: "smart-lab-abd80.firebaseapp.com",
-  projectId: "smart-lab-abd80",
-  storageBucket: "smart-lab-abd80.firebasestorage.app",
-  messagingSenderId: "82399096157",
-  appId: "1:82399096157:web:e99b37e6efa3654f5c8cb4"
-};
-
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-
-const USERNAME_DOMAIN = 'smart-lab.internal';
-
-const loginScreen = document.getElementById('loginScreen');
-const changePasswordScreen = document.getElementById('changePasswordScreen');
-const adminScreen = document.getElementById('adminScreen');
-const loginForm = document.getElementById('loginForm');
-const loginBtn = document.getElementById('loginBtn');
-const loginError = document.getElementById('loginError');
-const greeting = document.getElementById('greeting');
-const logoutBtn = document.getElementById('logoutBtn');
-const showChangePasswordBtn = document.getElementById('showChangePasswordBtn');
-const changePasswordForm = document.getElementById('changePasswordForm');
-const changePasswordError = document.getElementById('changePasswordError');
-const changePasswordSuccess = document.getElementById('changePasswordSuccess');
-
-let currentProfile = null; // { uid, username, role, status }
-
-showChangePasswordBtn.addEventListener('click', () => {
-  changePasswordScreen.classList.toggle('hidden');
-});
-
-// Self-service password change for the currently signed-in account.
-// Reauthenticates with the current password first -- Firebase requires a
-// recent sign-in for updatePassword, and this doubles as basic protection
-// against changing the password from an unlocked, unattended device.
-changePasswordForm.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  changePasswordError.textContent = '';
-  changePasswordSuccess.textContent = '';
-  const currentPassword = document.getElementById('currentPassword').value;
-  const newOwnPassword = document.getElementById('newOwnPassword').value;
-  try {
-    const cred = EmailAuthProvider.credential(auth.currentUser.email, currentPassword);
-    await reauthenticateWithCredential(auth.currentUser, cred);
-    await updatePassword(auth.currentUser, newOwnPassword);
-    changePasswordSuccess.textContent = 'Password updated.';
-    changePasswordForm.reset();
-  } catch (err) {
-    changePasswordError.textContent = `Couldn't update password: ${err.code || err.message}`;
-  }
-});
-
-// ---------------------------------------------------------------------
-// Login: username -> usernames/{username}.authEmail -> sign in with that
-// email. The username is the stable identifier everything else should
-// eventually reference (see users/{uid} doc note below) — the uid behind
-// it can be swapped out later via reissue without anything else changing.
-// ---------------------------------------------------------------------
-loginForm.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  loginError.textContent = '';
-  loginBtn.disabled = true;
-  const username = document.getElementById('username').value.trim();
-  const password = document.getElementById('password').value;
-  try {
-    const usernameSnap = await getDoc(doc(db, 'usernames', username));
-    if (!usernameSnap.exists()) throw new Error('no-such-username');
-    const { authEmail } = usernameSnap.data();
-    await signInWithEmailAndPassword(auth, authEmail, password);
-  } catch (err) {
-    console.error('Login failed:', err);
-    loginError.textContent = `Login failed: check username and password. (${err.code || err.message})`;
-  } finally {
-    loginBtn.disabled = false;
-  }
-});
-
-logoutBtn.addEventListener('click', () => signOut(auth));
-
-onAuthStateChanged(auth, async (user) => {
-  if (!user) {
-    adminScreen.classList.add('hidden');
-    greeting.classList.add('hidden');
-    logoutBtn.classList.add('hidden');
-    showChangePasswordBtn.classList.add('hidden');
-    loginScreen.classList.remove('hidden');
-    changePasswordScreen.classList.add('hidden');
-    changePasswordForm.reset();
-    changePasswordError.textContent = '';
-    changePasswordSuccess.textContent = '';
-    currentProfile = null;
-    return;
-  }
-
-  loginScreen.classList.add('hidden');
-  logoutBtn.classList.remove('hidden');
-  showChangePasswordBtn.classList.remove('hidden');
-  loginForm.reset();
-
-  const profileSnap = await getDoc(doc(db, 'users', user.uid));
-  if (!profileSnap.exists()) {
-    greeting.classList.add('hidden');
-    adminScreen.classList.add('hidden');
-    currentProfile = null;
-    return;
-  }
-  const profile = profileSnap.data();
-  currentProfile = { uid: user.uid, ...profile };
-
-  greeting.textContent = '';
-  const nameEl = document.createElement('strong');
-  nameEl.textContent = profile.username;
-  // Admin's username and role are effectively the same word -- "Hello
-  // admin -- admin" reads as redundant, so admin gets just the name.
-  if (profile.role === 'admin') {
-    greeting.append('Hello ', nameEl);
-  } else {
-    greeting.append('Hello ', nameEl, ` — ${profile.role}`);
-  }
-  greeting.classList.remove('hidden');
-
-  if (profile.role === 'admin') {
-    adminScreen.classList.remove('hidden');
-    loadUserList();
-  } else {
-    adminScreen.classList.add('hidden');
-  }
-});
-
-// ---------------------------------------------------------------------
-// Admin: add user + edit role/status + reissue password.
-// Convenience-only gating here (hide the screen) -- the actual protection
-// is the isAdmin() check in setup/firestore.rules.
-// Verifier is intentionally not modeled here -- stripped for now, coming
-// back later in a different shape.
-// ---------------------------------------------------------------------
-const addUserForm = document.getElementById('addUserForm');
-const addUserBtn = document.getElementById('addUserBtn');
-const addUserError = document.getElementById('addUserError');
-const newRoleSelect = document.getElementById('newRole');
-const userListBody = document.getElementById('userListBody');
-const statusToggle = document.getElementById('statusToggle');
-const filterButtons = statusToggle.querySelectorAll('button');
-
-let allUsers = [];
-let userListFilter = 'active';
-
-filterButtons.forEach((btn) => {
-  btn.addEventListener('click', () => {
-    userListFilter = btn.dataset.filter;
-    filterButtons.forEach((b) => b.classList.toggle('active', b === btn));
-    statusToggle.classList.toggle('is-disabled', userListFilter === 'disabled');
-    renderUserList();
-  });
-});
-
-// Creating a new Firebase Auth account signs that account in on whatever
-// auth instance made the call -- so it's done on a throwaway secondary
-// app instance instead of the primary one, to avoid signing the admin
-// out of their own session.
-async function createAuthAccountWithoutSigningOut(email, password) {
-  const secondaryApp = initializeApp(firebaseConfig, `secondary-${Date.now()}`);
-  const secondaryAuth = getAuth(secondaryApp);
-  try {
-    const cred = await createUserWithEmailAndPassword(secondaryAuth, email, password);
-    return cred.user.uid;
-  } finally {
-    await signOut(secondaryAuth).catch(() => {});
-    await deleteApp(secondaryApp).catch(() => {});
-  }
-}
-
-addUserForm.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  addUserError.textContent = '';
-  addUserBtn.disabled = true;
-  const username = document.getElementById('newUsername').value.trim();
-  const password = document.getElementById('newPassword').value;
-  const role = newRoleSelect.value;
-  const authEmail = `${username}@${USERNAME_DOMAIN}`;
-  try {
-    const newUid = await createAuthAccountWithoutSigningOut(authEmail, password);
-    // username is the stable identifier -- a future case/sample/action
-    // model should reference people by username, never by uid, since the
-    // uid behind a username can change via reissue (see Step 4).
-    await setDoc(doc(db, 'users', newUid), { username, role, status: 'active' });
-    await setDoc(doc(db, 'usernames', username), { authEmail });
-    addUserForm.reset();
-    loadUserList();
-  } catch (err) {
-    addUserError.textContent = err.code === 'auth/email-already-in-use'
-      ? 'That username is already taken.'
-      : `Couldn't add user: ${err.message}`;
-  } finally {
-    addUserBtn.disabled = false;
-  }
-});
-
-async function loadUserList() {
-  userListBody.innerHTML = '<tr><td colspan="4" class="muted">Loading…</td></tr>';
-  const snap = await getDocs(collection(db, 'users'));
-  allUsers = [];
-  snap.forEach((d) => allUsers.push({ uid: d.id, ...d.data() }));
-  allUsers.sort((a, b) => a.username.localeCompare(b.username));
-  renderUserList();
-}
-
-// Active users only by default -- the "Disabled" toggle swaps the view
-// rather than showing both at once, so a growing disabled list doesn't
-// clutter the common case.
-function renderUserList() {
-  const rows = allUsers.filter((u) => u.status === userListFilter);
-  userListBody.innerHTML = '';
-  if (rows.length === 0) {
-    userListBody.innerHTML = `<tr><td colspan="4" class="muted">No ${userListFilter} users.</td></tr>`;
-    return;
-  }
-  rows.forEach((u) => userListBody.appendChild(renderUserRow(u)));
-}
-
-function renderUserRow(u) {
-  const tr = document.createElement('tr');
-  const usernameTd = document.createElement('td');
-  usernameTd.textContent = u.username;
-
-  // There's exactly one admin account, it isn't editable through this
-  // screen (no "admin" option ever appears in the role dropdown either,
-  // above), and there's no second admin to promote -- so its own row is
-  // read-only display rather than the usual edit controls.
-  let roleTd, statusTd;
-  if (u.role === 'admin') {
-    roleTd = document.createElement('td'); roleTd.textContent = u.role;
-    statusTd = document.createElement('td'); statusTd.textContent = u.status;
-  } else {
-    const roleSelect = document.createElement('select');
-    ['client', 'team_leader', 'worker'].forEach((r) => {
-      const opt = document.createElement('option');
-      opt.value = r;
-      opt.textContent = r;
-      if (r === u.role) opt.selected = true;
-      roleSelect.appendChild(opt);
-    });
-
-    const statusSelect = document.createElement('select');
-    ['active', 'disabled'].forEach((s) => {
-      const opt = document.createElement('option');
-      opt.value = s;
-      opt.textContent = s;
-      if (s === u.status) opt.selected = true;
-      statusSelect.appendChild(opt);
-    });
-
-    async function saveField(field, value) {
-      await updateDoc(doc(db, 'users', u.uid), { [field]: value });
-    }
-    roleSelect.addEventListener('change', () => saveField('role', roleSelect.value));
-    statusSelect.addEventListener('change', async () => {
-      await saveField('status', statusSelect.value);
-      loadUserList(); // changing status may move this row out of the current filter
-    });
-
-    roleTd = document.createElement('td'); roleTd.appendChild(roleSelect);
-    statusTd = document.createElement('td'); statusTd.appendChild(statusSelect);
-  }
-
-  const actionTd = document.createElement('td');
-  const reissueBtn = document.createElement('button');
-  reissueBtn.type = 'button';
-  reissueBtn.className = 'btn btn-small';
-  reissueBtn.textContent = 'Reissue';
-  actionTd.appendChild(reissueBtn);
-
-  tr.appendChild(usernameTd);
-  tr.appendChild(roleTd);
-  tr.appendChild(statusTd);
-  tr.appendChild(actionTd);
-
-  reissueBtn.addEventListener('click', () => {
-    if (tr.querySelector('.reissue-row')) return; // already open
-    const reissueTr = document.createElement('tr');
-    reissueTr.className = 'reissue-row';
-    const td = document.createElement('td');
-    td.colSpan = 4;
-    const input = document.createElement('input');
-    input.type = 'password';
-    input.placeholder = 'New password';
-    const confirmBtn = document.createElement('button');
-    confirmBtn.type = 'button';
-    confirmBtn.className = 'btn btn-small btn-primary';
-    confirmBtn.textContent = 'Confirm';
-    confirmBtn.style.marginLeft = '8px';
-    const cancelBtn = document.createElement('button');
-    cancelBtn.type = 'button';
-    cancelBtn.className = 'btn btn-small';
-    cancelBtn.textContent = 'Cancel';
-    cancelBtn.style.marginLeft = '8px';
-    const errSpan = document.createElement('span');
-    errSpan.className = 'error';
-    errSpan.style.marginLeft = '8px';
-
-    cancelBtn.addEventListener('click', () => reissueTr.remove());
-    confirmBtn.addEventListener('click', () => reissueUser(u, input.value, errSpan, confirmBtn));
-
-    td.appendChild(input);
-    td.appendChild(confirmBtn);
-    td.appendChild(cancelBtn);
-    td.appendChild(errSpan);
-    reissueTr.appendChild(td);
-    tr.after(reissueTr);
-  });
-
-  return tr;
-}
-
-// ---------------------------------------------------------------------
-// Step 4: reissue. Not a true Admin-SDK password reset (still needs
-// Blaze) -- creates a brand-new Auth account under a disambiguated email,
-// copies the profile over, disables the old account's doc, and repoints
-// usernames/{username} at the new account. Net effect for the user: same
-// username, new password, everything else unchanged.
-// ---------------------------------------------------------------------
-async function reissueUser(u, newPassword, errSpan, confirmBtn) {
-  if (!newPassword) { errSpan.textContent = 'Enter a password.'; return; }
-  confirmBtn.disabled = true;
-  errSpan.textContent = '';
-  try {
-    const disambiguatedEmail = `${u.username}.r${Date.now()}@${USERNAME_DOMAIN}`;
-    const newUid = await createAuthAccountWithoutSigningOut(disambiguatedEmail, newPassword);
-    await setDoc(doc(db, 'users', newUid), {
-      username: u.username, role: u.role, status: 'active'
-    });
-    await updateDoc(doc(db, 'users', u.uid), { status: 'disabled' });
-    await updateDoc(doc(db, 'usernames', u.username), { authEmail: disambiguatedEmail });
-    loadUserList();
-  } catch (err) {
-    errSpan.textContent = `Failed: ${err.message}`;
-    confirmBtn.disabled = false;
-  }
-}
-
+<script type="module" src="js/auth-ui.js?v=0.4.1"></script>
+<script type="module" src="js/admin-ui.js?v=0.4.1"></script>
+<script type="module" src="js/case-types-ui.js?v=0.4.1"></script>
+<script type="module" src="js/clients-ui.js?v=0.4.1"></script>
+<script type="module" src="js/cases.js?v=0.4.1"></script>
+<script type="module" src="js/client-view.js?v=0.4.1"></script>
+<script type="module" src="js/update-banner.js?v=0.4.1"></script>
+<script type="module" src="js/changelog.js?v=0.4.1"></script>
+<script>
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js');
 }
-
-async function checkForUpdate(){
-  try{
-    const res = await fetch('./index.html', {cache:'no-store'});
-    const html = await res.text();
-    const match = html.match(/const APP_VERSION\s*=\s*'([^']+)'/);
-    if(!match) return;
-    const remoteVersion = match[1];
-    if(remoteVersion === APP_VERSION) return;
-    document.getElementById('updateBanner').style.display = 'flex';
-  }catch(e){ /* offline or not yet deployed — ignore */ }
-}
-document.getElementById('reloadBtn').addEventListener('click', ()=> location.reload());
-document.getElementById('dismissBtn').addEventListener('click', ()=>{
-  document.getElementById('updateBanner').style.display = 'none';
-});
-checkForUpdate();
-document.addEventListener('visibilitychange', ()=>{
-  if(document.visibilityState === 'visible') checkForUpdate();
-});
 </script>
 </body>
 </html>
