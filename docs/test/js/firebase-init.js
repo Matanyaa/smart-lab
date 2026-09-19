@@ -16,7 +16,7 @@ import {
 // approach proven to actually work here). Bump ALL of those alongside
 // this constant on every version change -- see docs/test/index.html and
 // each js/*.js file's own import line.
-export const APP_VERSION = '0.4.1-t05';
+export const APP_VERSION = '0.4.1-t06';
 
 export const USERNAME_DOMAIN = 'smart-lab.internal';
 
