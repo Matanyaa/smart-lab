@@ -1,12 +1,12 @@
-import { db } from './firebase-init.js?v=0.4.1-t18';
+import { db } from './firebase-init.js?v=0.4.1-t19';
 import {
   collection, doc, getDoc, getDocs, addDoc, updateDoc, deleteDoc, query, where, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { loadCaseTypes, getCachedCaseTypes, findCaseTypeById } from './case-types-ui.js?v=0.4.1-t18';
+import { loadCaseTypes, getCachedCaseTypes, findCaseTypeById } from './case-types-ui.js?v=0.4.1-t19';
 import {
   loadClientOrgsAndClients, getCachedClientOrgs, getCachedClientsForOrg, fetchClientsForOrg,
   findClientById, findClientOrgById
-} from './clients-ui.js?v=0.4.1-t18';
+} from './clients-ui.js?v=0.4.1-t19';
 
 // ---------------------------------------------------------------------
 // Core case/sample/action model (0.4.1 redesign -- see SPEC.md's "Case
@@ -36,11 +36,13 @@ const newCaseManagerSelect = document.getElementById('newCaseManager');
 
 const TRASH_ICON_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6M14 11v6"></path><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path></svg>`;
 const DUPLICATE_ICON_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`;
+const EDIT_ICON_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>`;
 
 let myProfile = null; // { uid, username, role }
 let cases = [];
 let infoEditMode = false;
 let expandedSamples = new Set();
+let editingSamples = new Set();
 let notesShown = false;
 let viewedStage = null; // null = follow the case's real current stage
 
@@ -993,26 +995,31 @@ function defaultSampleActions(template) {
   }));
 }
 
-// Repeatable named-row editor -- one text input per row, used for both
-// the batch-add view's sample-name list and its zone list. Reuses
+// Repeatable named-row editor -- one text input per row, used for the
+// batch-add view's sample-name/zone lists and for editing an existing
+// sample's zones in place (buildSampleStructureCard's edit mode). Reuses
 // .value-row's flex/wrap styling (built for the action value editors)
-// since a single-input row fits that layout fine too.
-function buildNameListEditor(addButtonLabel, placeholder) {
+// since a single-input row fits that layout fine too. `initialValues`
+// pre-populates rows (e.g. a sample's existing zones) without stealing
+// focus the way a freshly-added row does.
+function buildNameListEditor(addButtonLabel, placeholder, initialValues = []) {
   const wrap = document.createElement('div');
   const rows = document.createElement('div');
   wrap.appendChild(rows);
-  function addRow() {
+  function addRow(value, focusNewRow) {
     const row = document.createElement('div'); row.className = 'value-row';
     const input = document.createElement('input'); input.placeholder = placeholder;
+    if (value) input.value = value;
     const rm = document.createElement('button'); rm.type = 'button'; rm.className = 'btn btn-small'; rm.textContent = '✕';
     rm.addEventListener('click', () => row.remove());
     row.append(input, rm);
     rows.appendChild(row);
-    input.focus();
+    if (focusNewRow) input.focus();
   }
+  initialValues.forEach((v) => addRow(v, false));
   const addBtn = document.createElement('button');
   addBtn.type = 'button'; addBtn.className = 'btn btn-small'; addBtn.textContent = addButtonLabel;
-  addBtn.addEventListener('click', addRow);
+  addBtn.addEventListener('click', () => addRow(null, true));
   wrap.appendChild(addBtn);
   wrap.getValues = () => Array.from(rows.querySelectorAll('input')).map((i) => i.value.trim()).filter(Boolean);
   return wrap;
@@ -1166,53 +1173,96 @@ function buildSampleStructureCard(c, s) {
 
   if (!expanded) return card;
 
-  // Zones display + per-sample add-zone control (0.4.1 follow-up: zones
-  // are set per sample directly, not only at batch-creation time).
+  const isEditing = editingSamples.has(s.id);
+
+  if (isEditing) {
+    // Full inline edit form -- item, name, and a re-populated zones list
+    // editor (rename/remove any zone, add new ones), replacing the old
+    // read-only display + one-off "+ Zone" quick-add (2026-09-23, at the
+    // user's request: "allow sample edit -- name, zone names, deleting
+    // zones"). Save writes all three fields in one updateDoc; Cancel just
+    // exits edit mode with no write.
+    const editForm = document.createElement('div');
+    editForm.className = 'sample-edit-form';
+
+    const itemField = document.createElement('div'); itemField.className = 'field';
+    const itemLabel = document.createElement('label'); itemLabel.textContent = 'Item';
+    const itemInput = document.createElement('input'); itemInput.value = s.item || '';
+    itemField.append(itemLabel, itemInput);
+    editForm.appendChild(itemField);
+
+    const nameField = document.createElement('div'); nameField.className = 'field';
+    const nameLabel = document.createElement('label'); nameLabel.textContent = 'Name';
+    const nameInput = document.createElement('input'); nameInput.value = s.name || '';
+    nameField.append(nameLabel, nameInput);
+    editForm.appendChild(nameField);
+
+    const zonesLabel = document.createElement('label'); zonesLabel.textContent = 'Zones';
+    editForm.appendChild(zonesLabel);
+    const zoneListEditor = buildNameListEditor('+ Zone', 'Zone name', s.zones || []);
+    editForm.appendChild(zoneListEditor);
+
+    const err = document.createElement('div'); err.className = 'error';
+    const saveBtn = document.createElement('button');
+    saveBtn.type = 'button'; saveBtn.className = 'btn btn-small btn-primary'; saveBtn.textContent = 'Save';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button'; cancelBtn.className = 'btn btn-small'; cancelBtn.textContent = 'Cancel'; cancelBtn.style.marginLeft = '8px';
+    saveBtn.style.marginTop = '10px';
+    editForm.append(saveBtn, cancelBtn, err);
+    card.appendChild(editForm);
+
+    cancelBtn.addEventListener('click', () => {
+      editingSamples.delete(s.id);
+      renderCaseDetail(c.id);
+    });
+    saveBtn.addEventListener('click', async () => {
+      const newName = nameInput.value.trim();
+      if (!newName) { err.textContent = 'Name is required.'; return; }
+      saveBtn.disabled = true;
+      await updateDoc(doc(db, 'test_cases', c.id, 'test_samples', s.id), {
+        item: itemInput.value.trim() || null,
+        name: newName,
+        zones: zoneListEditor.getValues()
+      });
+      editingSamples.delete(s.id);
+      await renderCaseDetail(c.id);
+    });
+
+    return card;
+  }
+
+  // Read-only zones display -- switches to the edit form above via the
+  // Edit icon below.
   const zonesRow = document.createElement('div');
   zonesRow.style.display = 'flex'; zonesRow.style.alignItems = 'center'; zonesRow.style.gap = '8px'; zonesRow.style.flexWrap = 'wrap';
   const zonesText = document.createElement('span'); zonesText.className = 'muted';
   zonesText.textContent = s.zones && s.zones.length ? 'Zones: ' + s.zones.join(', ') : 'No zones yet';
-  const addZoneBtn = document.createElement('button');
-  addZoneBtn.type = 'button'; addZoneBtn.className = 'btn btn-small'; addZoneBtn.textContent = '+ Zone';
-  zonesRow.append(zonesText, addZoneBtn);
+  zonesRow.append(zonesText);
   card.appendChild(zonesRow);
 
-  addZoneBtn.addEventListener('click', () => {
-    if (card.querySelector('.add-zone-form')) return;
-    const form = document.createElement('div');
-    form.className = 'add-zone-form';
-    form.style.display = 'flex'; form.style.gap = '6px'; form.style.marginTop = '6px';
-    const input = document.createElement('input'); input.placeholder = 'Zone name';
-    const confirmBtn = document.createElement('button');
-    confirmBtn.type = 'button'; confirmBtn.className = 'btn btn-small btn-primary'; confirmBtn.textContent = 'Add';
-    const cancelBtn = document.createElement('button');
-    cancelBtn.type = 'button'; cancelBtn.className = 'btn btn-small'; cancelBtn.textContent = 'Cancel';
-    form.append(input, confirmBtn, cancelBtn);
-    zonesRow.after(form);
-    input.focus();
-    cancelBtn.addEventListener('click', () => form.remove());
-    confirmBtn.addEventListener('click', async () => {
-      const zoneName = input.value.trim();
-      if (!zoneName) return;
-      confirmBtn.disabled = true;
-      await updateDoc(doc(db, 'test_cases', c.id, 'test_samples', s.id), { zones: [...(s.zones || []), zoneName] });
-      await renderCaseDetail(c.id);
-    });
-  });
-
-  // Duplicate + Delete -- common per-sample actions, shown as small icon
-  // buttons rather than text (at the user's request, 2026-09-22: "for
+  // Edit + Duplicate + Delete -- common per-sample actions, shown as small
+  // icon buttons rather than text (at the user's request, 2026-09-22: "for
   // common actions use icons"), matching the icon-btn pattern already used
   // for the case-detail header and overview row (TRASH_ICON_SVG etc.).
-  // Duplicate is open to any case staff (same write permission as adding a
-  // sample) -- copies item/name/zones and seeds fresh default actions,
-  // exactly like creating a new sample, just pre-filled. Delete stays
-  // team_leader-only, matching setup/firestore.rules' samples delete rule
-  // (unchanged from Iteration 4); it cascade-deletes the sample's own
-  // actions first, same reasoning as case deletion: Firestore doesn't
-  // cascade subcollections on its own.
+  // Edit and Duplicate are open to any case staff (same write permission
+  // as adding a sample). Duplicate copies item/name/zones and seeds fresh
+  // default actions, exactly like creating a new sample, just pre-filled.
+  // Delete stays team_leader-only, matching setup/firestore.rules' samples
+  // delete rule (unchanged from Iteration 4); it cascade-deletes the
+  // sample's own actions first, same reasoning as case deletion: Firestore
+  // doesn't cascade subcollections on its own.
   const actionsRow = document.createElement('div');
   actionsRow.className = 'sample-actions-row';
+
+  const editBtn = document.createElement('button');
+  editBtn.type = 'button'; editBtn.className = 'icon-btn icon-btn-small icon-btn-accent';
+  editBtn.title = 'Edit sample'; editBtn.setAttribute('aria-label', 'Edit sample');
+  editBtn.innerHTML = EDIT_ICON_SVG;
+  editBtn.addEventListener('click', () => {
+    editingSamples.add(s.id);
+    renderCaseDetail(c.id);
+  });
+  actionsRow.appendChild(editBtn);
 
   const duplicateBtn = document.createElement('button');
   duplicateBtn.type = 'button'; duplicateBtn.className = 'icon-btn icon-btn-small icon-btn-accent';
@@ -1221,6 +1271,15 @@ function buildSampleStructureCard(c, s) {
   duplicateBtn.addEventListener('click', async () => {
     duplicateBtn.disabled = true;
     try {
+      // If the original has no running number yet, give it "(1)" as part
+      // of this same operation, so the two samples read as a clear pair
+      // ("Screw (1)"/"Screw (2)") instead of one bare and one numbered
+      // (2026-09-23, at the user's request). Only the original's own name
+      // needs updating -- nextDuplicateName's sibling scan already treats
+      // an unnumbered name as instance 1 when computing the copy's number.
+      if (!/^(.*) \((\d+)\)$/.test(s.name)) {
+        await updateDoc(doc(db, 'test_cases', c.id, 'test_samples', s.id), { name: `${s.name} (1)` });
+      }
       const newName = await nextDuplicateName(c.id, s.item, s.name);
       const sampleRef = await addDoc(collection(db, 'test_cases', c.id, 'test_samples'), { item: s.item, name: newName, zones: s.zones || [] });
       for (const action of defaultSampleActions(c.labWorkflowTemplate)) {
