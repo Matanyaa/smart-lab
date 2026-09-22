@@ -1,12 +1,12 @@
-import { db } from './firebase-init.js?v=0.4.1-t15';
+import { db } from './firebase-init.js?v=0.4.1-t16';
 import {
   collection, doc, getDoc, getDocs, addDoc, updateDoc, deleteDoc, query, where, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { loadCaseTypes, getCachedCaseTypes, findCaseTypeById } from './case-types-ui.js?v=0.4.1-t15';
+import { loadCaseTypes, getCachedCaseTypes, findCaseTypeById } from './case-types-ui.js?v=0.4.1-t16';
 import {
   loadClientOrgsAndClients, getCachedClientOrgs, getCachedClientsForOrg, fetchClientsForOrg,
   findClientById, findClientOrgById
-} from './clients-ui.js?v=0.4.1-t15';
+} from './clients-ui.js?v=0.4.1-t16';
 
 // ---------------------------------------------------------------------
 // Core case/sample/action model (0.4.1 redesign -- see SPEC.md's "Case
@@ -80,7 +80,7 @@ function validateCaseNumberShape(value) {
 }
 
 async function nextTempNumber() {
-  const snap = await getDocs(collection(db, 'cases'));
+  const snap = await getDocs(collection(db, 'test_cases'));
   const used = new Set();
   snap.forEach((d) => {
     const m = /^temp(\d+)$/.exec(d.data().caseNumber || '');
@@ -171,7 +171,7 @@ newCaseForm.addEventListener('submit', async (e) => {
   // automatically, never user-entered.
   const caseType = newCaseTypeSelect.value ? findCaseTypeById(newCaseTypeSelect.value) : null;
   try {
-    await addDoc(collection(db, 'cases'), {
+    await addDoc(collection(db, 'test_cases'), {
       caseNumber,
       clientCaseNumber: clientCaseNumber || null,
       name,
@@ -275,8 +275,8 @@ function canUpdateCase(c) {
 async function loadCaseList() {
   caseTypeGroupsContainer.innerHTML = '<p class="muted">Loading…</p>';
   const q = myProfile.role === 'team_leader'
-    ? query(collection(db, 'cases'), where('openedBy', '==', myProfile.username))
-    : collection(db, 'cases');
+    ? query(collection(db, 'test_cases'), where('openedBy', '==', myProfile.username))
+    : collection(db, 'test_cases');
   const snap = await getDocs(q);
   cases = [];
   snap.forEach((d) => cases.push({ id: d.id, ...d.data() }));
@@ -482,7 +482,7 @@ async function openCaseDetail(caseId) {
 }
 
 async function saveCaseField(caseId, field, value) {
-  await updateDoc(doc(db, 'cases', caseId), { [field]: value });
+  await updateDoc(doc(db, 'test_cases', caseId), { [field]: value });
 }
 
 // Catches up any stage transition a plain worker couldn't itself write
@@ -494,17 +494,17 @@ async function runAutoAdvanceChecks(caseId, c, samples) {
 }
 
 async function renderCaseDetail(caseId) {
-  const caseSnap = await getDoc(doc(db, 'cases', caseId));
+  const caseSnap = await getDoc(doc(db, 'test_cases', caseId));
   if (!caseSnap.exists()) {
     caseMainView.innerHTML = '<p class="error">Case not found.</p>';
     return;
   }
   const c = { id: caseId, ...caseSnap.data() };
 
-  const samplesSnap = await getDocs(collection(db, 'cases', caseId, 'samples'));
+  const samplesSnap = await getDocs(collection(db, 'test_cases', caseId, 'test_samples'));
   const samples = [];
   for (const sDoc of samplesSnap.docs) {
-    const actionsSnap = await getDocs(collection(db, 'cases', caseId, 'samples', sDoc.id, 'actions'));
+    const actionsSnap = await getDocs(collection(db, 'test_cases', caseId, 'test_samples', sDoc.id, 'test_actions'));
     const actions = [];
     actionsSnap.forEach((aDoc) => actions.push({ id: aDoc.id, ...aDoc.data() }));
     samples.push({ id: sDoc.id, ...sDoc.data(), actions });
@@ -513,7 +513,7 @@ async function renderCaseDetail(caseId) {
 
   await runAutoAdvanceChecks(caseId, c, samples);
   // Re-read after a possible auto-advance so the rendered stage is current.
-  const freshSnap = await getDoc(doc(db, 'cases', caseId));
+  const freshSnap = await getDoc(doc(db, 'test_cases', caseId));
   const cFresh = { id: caseId, ...freshSnap.data() };
 
   caseDetailTitle.innerHTML = '';
@@ -708,14 +708,14 @@ async function maybeAutoAdvanceToWrite(caseId, samples) {
       if (!isActionComplete(a)) return;
     }
   }
-  await updateDoc(doc(db, 'cases', caseId), { stage: 'write', writingStage: 'draft' });
+  await updateDoc(doc(db, 'test_cases', caseId), { stage: 'write', writingStage: 'draft' });
 }
 
 async function maybeAutoAdvanceToDone(caseId, c) {
   const items = c.archivingWorkflow || [];
   if (items.length === 0) return;
   if (items.every((it) => it.status === 'done')) {
-    await updateDoc(doc(db, 'cases', caseId), { stage: 'done' });
+    await updateDoc(doc(db, 'test_cases', caseId), { stage: 'done' });
   }
 }
 
@@ -726,11 +726,11 @@ async function maybeAutoAdvanceToDone(caseId, c) {
 // up next time an authorized user opens the case (same pattern as the
 // forward auto-advances above).
 async function reopenToLabIfNeeded(caseId) {
-  const snap = await getDoc(doc(db, 'cases', caseId));
+  const snap = await getDoc(doc(db, 'test_cases', caseId));
   if (!snap.exists()) return;
   const c = snap.data();
   if (c.stage === 'write' && canUpdateCase({ id: caseId, ...c })) {
-    await updateDoc(doc(db, 'cases', caseId), { stage: 'lab', writingStage: null });
+    await updateDoc(doc(db, 'test_cases', caseId), { stage: 'lab', writingStage: null });
   }
 }
 
@@ -801,19 +801,28 @@ function buildWorkflowSection(c, samples) {
         btn.className = 'btn btn-primary'; btn.textContent = 'Start lab';
         btn.disabled = samples.length === 0;
         btn.addEventListener('click', async () => {
-          await updateDoc(doc(db, 'cases', c.id), { stage: 'lab' });
+          await updateDoc(doc(db, 'test_cases', c.id), { stage: 'lab' });
           await renderCaseDetail(c.id);
         });
         section.appendChild(btn);
       }
     }
   } else if (effectiveViewed === 'lab') {
-    // Already read-only (no buttons) regardless of stage, so it's safe to
-    // show this exact panel whether or not `lab` is the real current stage.
+    // Aggregate summary is safe to show regardless of stage (no buttons).
+    // The actual per-sample action list -- execute/verify/reopen, add
+    // action -- is the real action-execution surface (moved here from the
+    // samples section entirely, per the user's request via TASK.md) and
+    // only renders when lab is genuinely the case's current stage, same
+    // read-only-elsewhere rule as every other stage's live controls.
     const totalActions = samples.reduce((sum, s) => sum + s.actions.length, 0);
     const doneActions = samples.reduce((sum, s) => sum + s.actions.filter(isActionComplete).length, 0);
     const completeSamples = samples.filter((s) => s.actions.length > 0 && s.actions.every(isActionComplete)).length;
     section.appendChild(readonlyNote(`${completeSamples}/${samples.length} samples complete (${doneActions}/${totalActions} actions done). Moves to Write automatically once every sample's actions are done (verified-type actions need sign-off too).`));
+    if (isCurrentStage) {
+      samples.forEach((s) => section.appendChild(buildSampleActionsCard(c, s)));
+    } else if (samples.length > 0) {
+      section.appendChild(readonlyNote("This isn't the case's current stage -- actions can only be executed or verified while Lab is active."));
+    }
   } else if (effectiveViewed === 'write') {
     if (c.writingStage == null) {
       section.appendChild(readonlyNote('Not reached yet.'));
@@ -848,11 +857,11 @@ function buildWritingWorkflow(c, editAllowed) {
   if (!editAllowed) return wrap;
 
   async function setWritingStage(stage) {
-    await updateDoc(doc(db, 'cases', c.id), { writingStage: stage });
+    await updateDoc(doc(db, 'test_cases', c.id), { writingStage: stage });
     await renderCaseDetail(c.id);
   }
   async function publish() {
-    await updateDoc(doc(db, 'cases', c.id), { writingStage: 'published', stage: 'archive' });
+    await updateDoc(doc(db, 'test_cases', c.id), { writingStage: 'published', stage: 'archive' });
     await renderCaseDetail(c.id);
   }
 
@@ -908,7 +917,7 @@ function buildArchivingWorkflow(c, editAllowed) {
       const maxOrder = items.length ? Math.max(...items.map((i) => i.order)) : 0;
       const order = orderInput.value ? parseInt(orderInput.value, 10) : maxOrder + 1;
       const updated = [...items, { name, order, status: 'pending', executedBy: null, executedAt: null }];
-      await updateDoc(doc(db, 'cases', c.id), { archivingWorkflow: updated });
+      await updateDoc(doc(db, 'test_cases', c.id), { archivingWorkflow: updated });
       await renderCaseDetail(c.id);
     });
     wrap.appendChild(addForm);
@@ -929,7 +938,7 @@ function buildArchivingItemRow(c, item, idx, editAllowed) {
     removeBtn.type = 'button'; removeBtn.className = 'btn btn-small'; removeBtn.textContent = 'Remove';
     removeBtn.addEventListener('click', async () => {
       const updated = c.archivingWorkflow.filter((_, i) => i !== idx);
-      await updateDoc(doc(db, 'cases', c.id), { archivingWorkflow: updated });
+      await updateDoc(doc(db, 'test_cases', c.id), { archivingWorkflow: updated });
       await renderCaseDetail(c.id);
     });
     controls.appendChild(removeBtn);
@@ -940,7 +949,7 @@ function buildArchivingItemRow(c, item, idx, editAllowed) {
       execBtn.style.marginLeft = '6px';
       execBtn.addEventListener('click', async () => {
         const updated = c.archivingWorkflow.map((it, i) => (i === idx ? { ...it, status: 'done', executedBy: myProfile.username, executedAt: new Date() } : it));
-        await updateDoc(doc(db, 'cases', c.id), { archivingWorkflow: updated });
+        await updateDoc(doc(db, 'test_cases', c.id), { archivingWorkflow: updated });
         await renderCaseDetail(c.id);
       });
       controls.appendChild(execBtn);
@@ -954,19 +963,19 @@ function buildArchivingItemRow(c, item, idx, editAllowed) {
 // action, and note doc has to be deleted individually before the case
 // doc itself.
 async function deleteCaseCascade(caseId) {
-  const samplesSnap = await getDocs(collection(db, 'cases', caseId, 'samples'));
+  const samplesSnap = await getDocs(collection(db, 'test_cases', caseId, 'test_samples'));
   for (const sDoc of samplesSnap.docs) {
-    const actionsSnap = await getDocs(collection(db, 'cases', caseId, 'samples', sDoc.id, 'actions'));
+    const actionsSnap = await getDocs(collection(db, 'test_cases', caseId, 'test_samples', sDoc.id, 'test_actions'));
     for (const aDoc of actionsSnap.docs) {
-      await deleteDoc(doc(db, 'cases', caseId, 'samples', sDoc.id, 'actions', aDoc.id));
+      await deleteDoc(doc(db, 'test_cases', caseId, 'test_samples', sDoc.id, 'test_actions', aDoc.id));
     }
-    await deleteDoc(doc(db, 'cases', caseId, 'samples', sDoc.id));
+    await deleteDoc(doc(db, 'test_cases', caseId, 'test_samples', sDoc.id));
   }
-  const notesSnap = await getDocs(collection(db, 'cases', caseId, 'notes'));
+  const notesSnap = await getDocs(collection(db, 'test_cases', caseId, 'notes'));
   for (const nDoc of notesSnap.docs) {
-    await deleteDoc(doc(db, 'cases', caseId, 'notes', nDoc.id));
+    await deleteDoc(doc(db, 'test_cases', caseId, 'notes', nDoc.id));
   }
-  await deleteDoc(doc(db, 'cases', caseId));
+  await deleteDoc(doc(db, 'test_cases', caseId));
 }
 
 // ---------------------------------------------------------------------
@@ -1093,9 +1102,9 @@ function buildSamplesSection(c, samples) {
       for (const entry of entries) {
         for (let n = 1; n <= copies; n++) {
           const finalName = copies > 1 ? `${entry.name} (${n})` : entry.name;
-          const sampleRef = await addDoc(collection(db, 'cases', c.id, 'samples'), { item: entry.item, name: finalName, zones });
+          const sampleRef = await addDoc(collection(db, 'test_cases', c.id, 'test_samples'), { item: entry.item, name: finalName, zones });
           for (const action of defaultSampleActions(c.labWorkflowTemplate)) {
-            await addDoc(collection(db, 'cases', c.id, 'samples', sampleRef.id, 'actions'), action);
+            await addDoc(collection(db, 'test_cases', c.id, 'test_samples', sampleRef.id, 'test_actions'), action);
           }
         }
       }
@@ -1107,11 +1116,17 @@ function buildSamplesSection(c, samples) {
     }
   });
 
-  samples.forEach((s) => section.appendChild(buildSampleCard(c, s)));
+  samples.forEach((s) => section.appendChild(buildSampleStructureCard(c, s)));
   return section;
 }
 
-function buildSampleCard(c, s) {
+// Split 2026-09-22 (at the user's request, via TASK.md): the samples
+// section shows structure only (item/sample/zone) -- no action execution,
+// verification, or status content, which lives exclusively in the
+// workflow section's lab panel now (see buildSampleActionsCard below).
+// Both functions share `expandedSamples` as their expand/collapse state,
+// so expanding a sample in one section expands its counterpart too.
+function buildSampleStructureCard(c, s) {
   const card = document.createElement('div');
   card.className = 'sample-card';
   const expanded = expandedSamples.has(s.id);
@@ -1120,11 +1135,10 @@ function buildSampleCard(c, s) {
   header.className = 'sample-card-header';
   const title = document.createElement('strong');
   title.textContent = s.item ? `${s.item} - ${s.name}` : s.name;
-  const doneCount = s.actions.filter(isActionComplete).length;
-  const countSpan = document.createElement('span');
-  countSpan.className = 'muted';
-  countSpan.textContent = `${doneCount}/${s.actions.length} done ${expanded ? '▲' : '▼'}`;
-  header.append(title, countSpan);
+  const toggle = document.createElement('span');
+  toggle.className = 'muted';
+  toggle.textContent = expanded ? '▲' : '▼';
+  header.append(title, toggle);
   header.addEventListener('click', () => {
     if (expandedSamples.has(s.id)) expandedSamples.delete(s.id); else expandedSamples.add(s.id);
     renderCaseDetail(c.id);
@@ -1162,10 +1176,78 @@ function buildSampleCard(c, s) {
       const zoneName = input.value.trim();
       if (!zoneName) return;
       confirmBtn.disabled = true;
-      await updateDoc(doc(db, 'cases', c.id, 'samples', s.id), { zones: [...(s.zones || []), zoneName] });
+      await updateDoc(doc(db, 'test_cases', c.id, 'test_samples', s.id), { zones: [...(s.zones || []), zoneName] });
       await renderCaseDetail(c.id);
     });
   });
+
+  // Delete sample -- team_leader only, matching setup/firestore.rules'
+  // samples delete rule (unchanged from Iteration 4). Cascade-deletes the
+  // sample's own actions first, same reasoning as case deletion: Firestore
+  // doesn't cascade subcollections on its own.
+  if (myProfile.role === 'team_leader') {
+    const deleteWrap = document.createElement('div');
+    deleteWrap.style.marginTop = '12px';
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button'; deleteBtn.className = 'btn btn-small'; deleteBtn.textContent = 'Delete sample';
+    deleteWrap.appendChild(deleteBtn);
+
+    deleteBtn.addEventListener('click', () => {
+      if (deleteWrap.querySelector('.confirm-row')) return;
+      const confirmRow = document.createElement('span');
+      confirmRow.className = 'confirm-row';
+      confirmRow.style.marginLeft = '8px';
+      const msg = document.createElement('span'); msg.className = 'error'; msg.textContent = 'Delete this sample and its actions? ';
+      const confirmBtn = document.createElement('button');
+      confirmBtn.type = 'button'; confirmBtn.className = 'btn btn-small btn-primary'; confirmBtn.textContent = 'Confirm';
+      const cancelBtn = document.createElement('button');
+      cancelBtn.type = 'button'; cancelBtn.className = 'btn btn-small'; cancelBtn.textContent = 'Cancel'; cancelBtn.style.marginLeft = '6px';
+      cancelBtn.addEventListener('click', () => confirmRow.remove());
+      confirmBtn.addEventListener('click', async () => {
+        confirmBtn.disabled = true;
+        const actionsSnap = await getDocs(collection(db, 'test_cases', c.id, 'test_samples', s.id, 'test_actions'));
+        for (const aDoc of actionsSnap.docs) {
+          await deleteDoc(doc(db, 'test_cases', c.id, 'test_samples', s.id, 'test_actions', aDoc.id));
+        }
+        await deleteDoc(doc(db, 'test_cases', c.id, 'test_samples', s.id));
+        expandedSamples.delete(s.id);
+        await renderCaseDetail(c.id);
+      });
+      confirmRow.append(msg, confirmBtn, cancelBtn);
+      deleteWrap.appendChild(confirmRow);
+    });
+
+    card.appendChild(deleteWrap);
+  }
+
+  return card;
+}
+
+// Workflow-section counterpart: a sample's actions (execute/verify/reopen)
+// plus the "add action" form -- the entire action-execution surface that
+// used to live inline in the samples section. No zones, no delete-sample
+// here; those stay purely structural (see buildSampleStructureCard).
+function buildSampleActionsCard(c, s) {
+  const card = document.createElement('div');
+  card.className = 'sample-card';
+  const expanded = expandedSamples.has(s.id);
+
+  const header = document.createElement('div');
+  header.className = 'sample-card-header';
+  const title = document.createElement('strong');
+  title.textContent = s.item ? `${s.item} - ${s.name}` : s.name;
+  const doneCount = s.actions.filter(isActionComplete).length;
+  const countSpan = document.createElement('span');
+  countSpan.className = 'muted';
+  countSpan.textContent = `${doneCount}/${s.actions.length} done ${expanded ? '▲' : '▼'}`;
+  header.append(title, countSpan);
+  header.addEventListener('click', () => {
+    if (expandedSamples.has(s.id)) expandedSamples.delete(s.id); else expandedSamples.add(s.id);
+    renderCaseDetail(c.id);
+  });
+  card.appendChild(header);
+
+  if (!expanded) return card;
 
   s.actions.forEach((a) => card.appendChild(buildActionRow(c, s, a)));
 
@@ -1206,7 +1288,7 @@ function buildSampleCard(c, s) {
     const name = nameInput.value.trim();
     if (!name) return;
     const zone = zoneSelect && zoneSelect.value ? zoneSelect.value : null;
-    await addDoc(collection(db, 'cases', c.id, 'samples', s.id, 'actions'), {
+    await addDoc(collection(db, 'test_cases', c.id, 'test_samples', s.id, 'test_actions'), {
       name, zone, type: typeSelect.value, notes: '',
       environment: [], calibration: [], measurements: [],
       status: false, executedBy: null, executionTimestamp: null,
@@ -1215,45 +1297,6 @@ function buildSampleCard(c, s) {
     await reopenToLabIfNeeded(c.id);
     await renderCaseDetail(c.id);
   });
-
-  // Delete sample -- team_leader only, matching setup/firestore.rules'
-  // samples delete rule (unchanged from Iteration 4). Cascade-deletes the
-  // sample's own actions first, same reasoning as case deletion: Firestore
-  // doesn't cascade subcollections on its own.
-  if (myProfile.role === 'team_leader') {
-    const deleteWrap = document.createElement('div');
-    deleteWrap.style.marginTop = '12px';
-    const deleteBtn = document.createElement('button');
-    deleteBtn.type = 'button'; deleteBtn.className = 'btn btn-small'; deleteBtn.textContent = 'Delete sample';
-    deleteWrap.appendChild(deleteBtn);
-
-    deleteBtn.addEventListener('click', () => {
-      if (deleteWrap.querySelector('.confirm-row')) return;
-      const confirmRow = document.createElement('span');
-      confirmRow.className = 'confirm-row';
-      confirmRow.style.marginLeft = '8px';
-      const msg = document.createElement('span'); msg.className = 'error'; msg.textContent = 'Delete this sample and its actions? ';
-      const confirmBtn = document.createElement('button');
-      confirmBtn.type = 'button'; confirmBtn.className = 'btn btn-small btn-primary'; confirmBtn.textContent = 'Confirm';
-      const cancelBtn = document.createElement('button');
-      cancelBtn.type = 'button'; cancelBtn.className = 'btn btn-small'; cancelBtn.textContent = 'Cancel'; cancelBtn.style.marginLeft = '6px';
-      cancelBtn.addEventListener('click', () => confirmRow.remove());
-      confirmBtn.addEventListener('click', async () => {
-        confirmBtn.disabled = true;
-        const actionsSnap = await getDocs(collection(db, 'cases', c.id, 'samples', s.id, 'actions'));
-        for (const aDoc of actionsSnap.docs) {
-          await deleteDoc(doc(db, 'cases', c.id, 'samples', s.id, 'actions', aDoc.id));
-        }
-        await deleteDoc(doc(db, 'cases', c.id, 'samples', s.id));
-        expandedSamples.delete(s.id);
-        await renderCaseDetail(c.id);
-      });
-      confirmRow.append(msg, confirmBtn, cancelBtn);
-      deleteWrap.appendChild(confirmRow);
-    });
-
-    card.appendChild(deleteWrap);
-  }
 
   return card;
 }
@@ -1321,7 +1364,7 @@ function buildActionRow(c, s, a) {
       row.appendChild(form);
       saveBtn.addEventListener('click', async () => {
         saveBtn.disabled = true;
-        await updateDoc(doc(db, 'cases', c.id, 'samples', s.id, 'actions', a.id), {
+        await updateDoc(doc(db, 'test_cases', c.id, 'test_samples', s.id, 'test_actions', a.id), {
           notes: notesInput.value,
           environment: envEditor.getValues(),
           calibration: calEditor.getValues(),
@@ -1360,7 +1403,7 @@ function buildActionRow(c, s, a) {
         row.appendChild(form);
         saveBtn.addEventListener('click', async () => {
           saveBtn.disabled = true;
-          await updateDoc(doc(db, 'cases', c.id, 'samples', s.id, 'actions', a.id), {
+          await updateDoc(doc(db, 'test_cases', c.id, 'test_samples', s.id, 'test_actions', a.id), {
             verifiedBy: myProfile.username,
             verificationTimestamp: serverTimestamp(),
             verifiedMeasurements: measEditor.getValues()
@@ -1378,7 +1421,7 @@ function buildActionRow(c, s, a) {
   const reopenBtn = document.createElement('button');
   reopenBtn.type = 'button'; reopenBtn.className = 'btn btn-small'; reopenBtn.textContent = 'Reopen';
   reopenBtn.addEventListener('click', async () => {
-    await updateDoc(doc(db, 'cases', c.id, 'samples', s.id, 'actions', a.id), {
+    await updateDoc(doc(db, 'test_cases', c.id, 'test_samples', s.id, 'test_actions', a.id), {
       status: false, executedBy: null, executionTimestamp: null,
       verifiedBy: null, verificationTimestamp: null, verifiedMeasurements: []
     });
@@ -1399,7 +1442,7 @@ const NOTE_CATEGORY_LABELS = { noteToSelf: 'Note to self', research: 'Research',
 
 async function renderNotesView(caseId) {
   caseNotesView.innerHTML = '<p class="muted">Loading…</p>';
-  const snap = await getDocs(collection(db, 'cases', caseId, 'notes'));
+  const snap = await getDocs(collection(db, 'test_cases', caseId, 'notes'));
   const all = [];
   snap.forEach((d) => all.push({ id: d.id, ...d.data() }));
   all.sort((a, b) => (a.timestamp?.toMillis?.() || 0) - (b.timestamp?.toMillis?.() || 0));
@@ -1449,7 +1492,7 @@ function buildAddNoteForm(caseId, parentId) {
     e.preventDefault();
     const text = textInput.value.trim();
     if (!text) return;
-    await addDoc(collection(db, 'cases', caseId, 'notes'), {
+    await addDoc(collection(db, 'test_cases', caseId, 'notes'), {
       text,
       writtenBy: myProfile.username,
       timestamp: serverTimestamp(),

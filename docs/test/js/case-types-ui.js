@@ -1,4 +1,4 @@
-import { db } from './firebase-init.js?v=0.4.1-t15';
+import { db } from './firebase-init.js?v=0.4.1-t16';
 import {
   doc, setDoc, updateDoc, deleteDoc, collection, getDocs, addDoc
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
@@ -35,7 +35,7 @@ export const DEFAULT_ARCHIVING_WORKFLOW_TEMPLATE = [
 let caseTypes = [];
 
 export async function loadCaseTypes() {
-  const snap = await getDocs(collection(db, 'caseTypes'));
+  const snap = await getDocs(collection(db, 'test_caseTypes'));
   caseTypes = [];
   snap.forEach((d) => caseTypes.push({ id: d.id, ...d.data() }));
   caseTypes.sort((a, b) => a.name.localeCompare(b.name));
@@ -71,7 +71,7 @@ function renderCaseTypeRow(ct) {
   deleteBtn.textContent = 'Delete';
   deleteBtn.addEventListener('click', async () => {
     if (!confirm(`Delete case type "${ct.name}"? Existing cases keep their own copy of any seeded workflow, so this doesn't affect them.`)) return;
-    await deleteDoc(doc(db, 'caseTypes', ct.id));
+    await deleteDoc(doc(db, 'test_caseTypes', ct.id));
     renderCaseTypeList();
   });
   actionTd.appendChild(deleteBtn);
@@ -87,7 +87,7 @@ addCaseTypeForm.addEventListener('submit', async (e) => {
   const seedDefault = document.getElementById('newCaseTypeSeedDefault').checked;
   if (!name) { addCaseTypeError.textContent = 'Name is required.'; return; }
   try {
-    await addDoc(collection(db, 'caseTypes'), {
+    await addDoc(collection(db, 'test_caseTypes'), {
       name,
       tatGoalDays: tatRaw ? parseInt(tatRaw, 10) : null,
       labWorkflowTemplate: seedDefault ? DEFAULT_LAB_WORKFLOW_TEMPLATE : [],

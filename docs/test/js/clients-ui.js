@@ -1,4 +1,4 @@
-import { db } from './firebase-init.js?v=0.4.1-t15';
+import { db } from './firebase-init.js?v=0.4.1-t16';
 import {
   doc, deleteDoc, collection, getDocs, addDoc, query, where
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
@@ -16,12 +16,12 @@ let clientOrgs = [];
 let clientsByOrg = {}; // orgId -> [{id, name, clientOrgId}]
 
 export async function loadClientOrgsAndClients() {
-  const orgSnap = await getDocs(collection(db, 'clientOrgs'));
+  const orgSnap = await getDocs(collection(db, 'test_clientOrgs'));
   clientOrgs = [];
   orgSnap.forEach((d) => clientOrgs.push({ id: d.id, ...d.data() }));
   clientOrgs.sort((a, b) => a.name.localeCompare(b.name));
 
-  const clientSnap = await getDocs(collection(db, 'clients'));
+  const clientSnap = await getDocs(collection(db, 'test_clients'));
   clientsByOrg = {};
   clientSnap.forEach((d) => {
     const c = { id: d.id, ...d.data() };
@@ -47,7 +47,7 @@ export function findClientOrgById(id) {
 }
 
 export async function fetchClientsForOrg(orgId) {
-  const snap = await getDocs(query(collection(db, 'clients'), where('clientOrgId', '==', orgId)));
+  const snap = await getDocs(query(collection(db, 'test_clients'), where('clientOrgId', '==', orgId)));
   const list = [];
   snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
   list.sort((a, b) => a.name.localeCompare(b.name));
@@ -78,7 +78,7 @@ function renderClientOrgCard(org) {
   delOrgBtn.textContent = 'Delete org';
   delOrgBtn.addEventListener('click', async () => {
     if (!confirm(`Delete client org "${org.name}"? This does not delete its clients or any cases referencing them.`)) return;
-    await deleteDoc(doc(db, 'clientOrgs', org.id));
+    await deleteDoc(doc(db, 'test_clientOrgs', org.id));
     renderClientOrgList();
   });
   header.append(title, delOrgBtn);
@@ -95,7 +95,7 @@ function renderClientOrgCard(org) {
     delBtn.textContent = 'Remove';
     delBtn.style.marginLeft = '6px';
     delBtn.addEventListener('click', async () => {
-      await deleteDoc(doc(db, 'clients', c.id));
+      await deleteDoc(doc(db, 'test_clients', c.id));
       renderClientOrgList();
     });
     li.appendChild(delBtn);
@@ -116,7 +116,7 @@ function renderClientOrgCard(org) {
     e.preventDefault();
     const name = nameInput.value.trim();
     if (!name) return;
-    await addDoc(collection(db, 'clients'), { name, clientOrgId: org.id });
+    await addDoc(collection(db, 'test_clients'), { name, clientOrgId: org.id });
     renderClientOrgList();
   });
   card.appendChild(addForm);
@@ -130,7 +130,7 @@ addClientOrgForm.addEventListener('submit', async (e) => {
   const name = document.getElementById('newClientOrgName').value.trim();
   if (!name) { addClientOrgError.textContent = 'Name is required.'; return; }
   try {
-    await addDoc(collection(db, 'clientOrgs'), { name });
+    await addDoc(collection(db, 'test_clientOrgs'), { name });
     addClientOrgForm.reset();
     renderClientOrgList();
   } catch (err) {

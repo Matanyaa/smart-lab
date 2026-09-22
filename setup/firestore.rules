@@ -31,9 +31,13 @@ service cloud.firestore {
     function isCaseStaff() {
       return myRole() in ['team_leader', 'worker'];
     }
-    function clientBelongsToMyOrg(clientId) {
+    // Parameterized on the clients collection name (2026-09-22: `docs/test/`
+    // now reads/writes `test_`-prefixed case-data collections -- see the
+    // match blocks below -- so this needs to look the client doc up in
+    // whichever collection the caller is actually scoped to).
+    function clientBelongsToMyOrgIn(clientsCollection, clientId) {
       return clientId != null
-        && get(/databases/$(database)/documents/clients/$(clientId)).data.clientOrgId == myProfile().clientOrgId;
+        && get(/databases/$(database)/documents/$(clientsCollection)/$(clientId)).data.clientOrgId == myProfile().clientOrgId;
     }
 
     // Must be readable while signed out, to resolve a typed username into
@@ -79,11 +83,32 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // 2026-09-22: `docs/test/` now reads/writes these same six collections
+    // under a `test_` prefix instead (see CLAUDE.md's "Environments" /
+    // SPEC.md's Decisions Log) -- `users`/`usernames` stay shared/
+    // unprefixed on purpose, unlike these. Rules below are the exact same
+    // shape as their unprefixed counterparts, just re-scoped to the
+    // `test_` collections -- kept as literal duplicate match blocks since
+    // Firestore rules can't wildcard a partial path segment (no way to
+    // express "cases or test_cases" as one match pattern).
+    match /test_caseTypes/{caseTypeId} {
+      allow read: if isStaff();
+      allow write: if isAdmin();
+    }
+    match /test_clientOrgs/{orgId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+    match /test_clients/{clientId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
     match /cases/{caseId} {
       // 0.4.1: admin dropped entirely (was isStaff(), which included
       // admin) -- team_leader/worker as before, plus a client-org account
       // reading a case whose client belongs to that same org.
-      allow read: if isCaseStaff() || (myRole() == 'client' && clientBelongsToMyOrg(resource.data.client));
+      allow read: if isCaseStaff() || (myRole() == 'client' && clientBelongsToMyOrgIn('clients', resource.data.client));
       // 0.4.1: narrowed from isLeadOrAdmin() (team_leader-or-admin) to
       // team_leader only, now that admin has no case-data access at all.
       // openedBy is set by the app, not user-entered -- enforced here too,
@@ -105,6 +130,36 @@ service cloud.firestore {
         allow delete: if isSignedIn() && myRole() == 'team_leader';
 
         match /actions/{actionId} {
+          allow read, create, update: if isCaseStaff();
+          allow delete: if isSignedIn() && myRole() == 'team_leader';
+        }
+      }
+
+      match /notes/{noteId} {
+        allow read, create, update: if isCaseStaff();
+        allow delete: if isSignedIn() && myRole() == 'team_leader';
+      }
+    }
+
+    // Same rules as /cases/{caseId} above, re-scoped to `docs/test/`'s
+    // `test_cases` collection -- see the comment on the test_-prefixed
+    // lookup collections above for why this is a literal duplicate rather
+    // than a shared pattern. Nested `test_samples`/`test_actions` (2026-
+    // 09-22, matching the app code's own renamed subcollections) sit under
+    // this same match block, same as `samples`/`actions` do above; `notes`
+    // stays unprefixed either way since it's already fully isolated by
+    // nesting under a `test_cases` doc.
+    match /test_cases/{caseId} {
+      allow read: if isCaseStaff() || (myRole() == 'client' && clientBelongsToMyOrgIn('test_clients', resource.data.client));
+      allow create: if myRole() == 'team_leader' && request.resource.data.openedBy == myUsername();
+      allow update: if isCaseStaff() && (myRole() == 'team_leader' || resource.data.caseManager == myUsername());
+      allow delete: if isSignedIn() && myRole() == 'team_leader';
+
+      match /test_samples/{sampleId} {
+        allow read, create, update: if isCaseStaff();
+        allow delete: if isSignedIn() && myRole() == 'team_leader';
+
+        match /test_actions/{actionId} {
           allow read, create, update: if isCaseStaff();
           allow delete: if isSignedIn() && myRole() == 'team_leader';
         }

@@ -1,6 +1,6 @@
-import { db } from './firebase-init.js?v=0.4.1-t15';
+import { db } from './firebase-init.js?v=0.4.1-t16';
 import { collection, getDocs, query, where } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { loadClientOrgsAndClients, getCachedClientsForOrg } from './clients-ui.js?v=0.4.1-t15';
+import { loadClientOrgsAndClients, getCachedClientsForOrg } from './clients-ui.js?v=0.4.1-t16';
 
 // ---------------------------------------------------------------------
 // Client-org login case view (0.4.1). Minimal for this pass, per TASK.md
@@ -56,7 +56,7 @@ async function loadCases() {
   // client org with more than 30 named clients would need chunking, not
   // built here.
   const clientIds = orgClients.map((c) => c.id).slice(0, 30);
-  const snap = await getDocs(query(collection(db, 'cases'), where('client', 'in', clientIds)));
+  const snap = await getDocs(query(collection(db, 'test_cases'), where('client', 'in', clientIds)));
   allCases = [];
   snap.forEach((d) => allCases.push({ id: d.id, ...d.data() }));
   renderCaseList();
