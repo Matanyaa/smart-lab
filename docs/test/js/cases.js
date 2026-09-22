@@ -1,12 +1,12 @@
-import { db } from './firebase-init.js?v=0.4.1-t13';
+import { db } from './firebase-init.js?v=0.4.1-t14';
 import {
   collection, doc, getDoc, getDocs, addDoc, updateDoc, deleteDoc, query, where, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { loadCaseTypes, getCachedCaseTypes, findCaseTypeById } from './case-types-ui.js?v=0.4.1-t13';
+import { loadCaseTypes, getCachedCaseTypes, findCaseTypeById } from './case-types-ui.js?v=0.4.1-t14';
 import {
   loadClientOrgsAndClients, getCachedClientOrgs, getCachedClientsForOrg, fetchClientsForOrg,
   findClientById, findClientOrgById
-} from './clients-ui.js?v=0.4.1-t13';
+} from './clients-ui.js?v=0.4.1-t14';
 
 // ---------------------------------------------------------------------
 // Core case/sample/action model (0.4.1 redesign -- see SPEC.md's "Case
@@ -575,6 +575,7 @@ function buildInfoSection(c) {
   grid.className = 'case-grid';
 
   const caseNumInput = document.createElement('input');
+  caseNumInput.className = 'mono';
   caseNumInput.value = c.caseNumber || '';
   const caseNumWarn = document.createElement('div'); caseNumWarn.className = 'warn-text hidden';
   function refreshCaseNumWarn() {
@@ -588,6 +589,7 @@ function buildInfoSection(c) {
   grid.appendChild(fieldRow('Case number', caseNumInput, caseNumWarn));
 
   const clientNumInput = document.createElement('input');
+  clientNumInput.className = 'mono';
   clientNumInput.value = c.clientCaseNumber || '';
   const clientNumWarn = document.createElement('div'); clientNumWarn.className = 'warn-text hidden';
   function refreshClientNumWarn() {
@@ -1224,8 +1226,8 @@ function buildValueListEditor(label, initialValues) {
   function addRow(v) {
     const row = document.createElement('div'); row.className = 'value-row';
     const nameI = document.createElement('input'); nameI.placeholder = 'name'; nameI.value = v?.name || '';
-    const actualI = document.createElement('input'); actualI.placeholder = 'value'; actualI.value = v?.actualValue || '';
-    const unitsI = document.createElement('input'); unitsI.placeholder = 'units'; unitsI.value = v?.units || '';
+    const actualI = document.createElement('input'); actualI.className = 'mono'; actualI.placeholder = 'value'; actualI.value = v?.actualValue || '';
+    const unitsI = document.createElement('input'); unitsI.className = 'mono'; unitsI.placeholder = 'units'; unitsI.value = v?.units || '';
     const rmBtn = document.createElement('button'); rmBtn.type = 'button'; rmBtn.className = 'btn btn-small'; rmBtn.textContent = '✕';
     rmBtn.addEventListener('click', () => row.remove());
     row.append(nameI, actualI, unitsI, rmBtn);

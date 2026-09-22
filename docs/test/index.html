@@ -4,32 +4,39 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Smart Lab (Test)</title>
-<link rel="icon" type="image/svg+xml" href="icon.svg?v=0.4.1-t13">
+<link rel="icon" type="image/svg+xml" href="icon.svg?v=0.4.1-t14">
 <meta name="theme-color" content="#141a1f">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   :root{
     --bg:#141a1f; --panel:#1c242b; --panel2:#222c34; --border:#2e3a43; --border-soft:#283440;
     --text:#eef2f4; --text-dim:#9aa7af; --text-mute:#69747c;
     --accent:#f5a623; --accent-dim:#a86a17; --accent-text:#0d1a14;
     --warn:#d9a441; --err:#d96a4a;
+    --font-sans:'IBM Plex Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+    --font-mono:'IBM Plex Mono','SFMono-Regular',Consolas,monospace;
+    --radius:3px;
   }
   *{box-sizing:border-box;}
   body{
     margin:0; background:var(--bg); color:var(--text);
-    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+    font-family:var(--font-sans);
     font-size:15px; line-height:1.4;
   }
+  .mono{font-family:var(--font-mono);}
   a{color:var(--accent);}
   .hidden{display:none !important;}
-  .btn{background:var(--panel2); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:9px 14px; font:inherit; cursor:pointer;}
+  .btn{background:var(--panel2); color:var(--text); border:1px solid var(--border); border-radius:var(--radius); padding:9px 14px; font:inherit; cursor:pointer;}
   .btn:hover{border-color:var(--accent-dim);}
   .btn:disabled{opacity:0.5; cursor:default;}
   .btn-primary{background:var(--accent); color:var(--accent-text); border-color:var(--accent);}
   .btn-primary:hover{border-color:var(--accent);}
-  .btn-small{padding:4px 9px; font-size:12px; border-radius:6px;}
+  .btn-small{padding:4px 9px; font-size:12px; border-radius:var(--radius);}
   .btn.active{background:var(--accent-dim); border-color:var(--accent); color:var(--text);}
   input, select{
-    background:var(--panel2); color:var(--text); border:1px solid var(--border); border-radius:8px;
+    background:var(--panel2); color:var(--text); border:1px solid var(--border); border-radius:var(--radius);
     padding:10px 12px; font:inherit; width:100%;
   }
   input:focus, select:focus{outline:none; border-color:var(--accent-dim);}
@@ -42,16 +49,16 @@
   .brand-block{display:flex; flex-direction:row; align-items:center; gap:10px; justify-self:start; -webkit-user-select:none; user-select:none;}
   .brand-block img{width:36px; height:36px; display:block; flex-shrink:0;}
   .brand-text{display:flex; flex-direction:column;}
-  .brand-text h1{font-size:16px; margin:0; font-weight:700;}
-  .version-sub{font-size:10px; color:var(--text-mute); line-height:1.3;}
-  .badge{display:inline-block; padding:1px 8px; border-radius:10px; background:var(--panel2); border:1px solid var(--border); font-size:11px; color:var(--text-dim);}
+  .brand-text h1{font-size:16px; margin:0; font-weight:700; letter-spacing:-0.01em;}
+  .version-sub{font-size:10px; color:var(--text-mute); line-height:1.3; font-family:var(--font-mono);}
+  .badge{display:inline-block; padding:2px 7px; border-radius:var(--radius); background:var(--panel2); border:1px solid var(--border); font-family:var(--font-mono); font-size:11px; letter-spacing:0.04em; text-transform:uppercase; color:var(--text-dim);}
   .greeting{display:flex; flex-direction:column; align-items:center; text-align:center; justify-self:center; font-size:13px; color:var(--text-dim);}
   .greeting-name{color:var(--text); font-weight:700; font-size:14px;}
   .header-actions{display:flex; gap:8px; justify-self:end;}
   .icon-btn{
     display:inline-flex; align-items:center; justify-content:center;
     width:38px; height:38px; padding:0; flex-shrink:0;
-    background:var(--panel2); color:var(--text); border:1px solid var(--border); border-radius:8px; cursor:pointer;
+    background:var(--panel2); color:var(--text); border:1px solid var(--border); border-radius:var(--radius); cursor:pointer;
   }
   .icon-btn:hover{border-color:var(--accent-dim);}
   .icon-btn svg{width:18px; height:18px;}
@@ -63,7 +70,7 @@
   .icon-btn-small svg{width:14px; height:14px;}
 
   main{min-height:calc(100vh - 45px); display:flex; flex-direction:column; align-items:center; padding:24px; gap:20px;}
-  .card{background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:32px 28px; max-width:360px; width:100%; margin:auto;}
+  .card{background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:32px 28px; max-width:360px; width:100%; margin:auto;}
   .card h2{margin:0 0 20px; font-size:20px;}
   .field{margin-bottom:14px;}
   .error{color:var(--err); font-size:13px; margin-top:10px; min-height:16px;}
@@ -76,7 +83,7 @@
   #adminScreen .add-row .field{flex:1; min-width:110px; margin-bottom:0;}
 
   .tabs{display:flex; gap:8px; margin-bottom:18px; border-bottom:1px solid var(--border-soft); padding-bottom:10px;}
-  .tab-btn{background:transparent; border:1px solid var(--border); color:var(--text-dim); border-radius:8px; padding:6px 12px; font:inherit; font-size:13px; cursor:pointer;}
+  .tab-btn{background:transparent; border:1px solid var(--border); color:var(--text-dim); border-radius:var(--radius); padding:6px 12px; font:inherit; font-size:13px; cursor:pointer;}
   .tab-btn.active{background:var(--panel2); color:var(--text); border-color:var(--accent-dim);}
   .admin-panel h2{font-size:16px; margin:0 0 14px;}
 
@@ -86,15 +93,15 @@
   table.user-list .inline-action-row input{width:120px; display:inline-block;}
 
   #updateBanner{display:none; align-items:center; gap:10px; padding:8px 14px; background:var(--warn); color:#25200a; font-size:13px;}
-  #updateBanner button{border:1px solid #25200a55; background:transparent; color:#25200a; border-radius:6px; padding:4px 10px; font:inherit; cursor:pointer;}
+  #updateBanner button{border:1px solid #25200a55; background:transparent; color:#25200a; border-radius:var(--radius); padding:4px 10px; font:inherit; cursor:pointer;}
 
-  #versionBadge{cursor:pointer;}
+  #versionBadge{cursor:pointer; font-family:var(--font-mono);}
   .modal-overlay{position:fixed; inset:0; background:rgba(0,0,0,0.55); display:flex; align-items:center; justify-content:center; padding:24px; z-index:100;}
   #changelogCard{max-width:380px; max-height:80vh; overflow-y:auto;}
   .changelog-entry{margin-bottom:16px;}
   .changelog-entry:last-child{margin-bottom:0;}
-  .changelog-version{font-weight:700;}
-  .changelog-date{color:var(--text-dim); font-weight:400; font-size:12px; margin-left:8px;}
+  .changelog-version{font-weight:700; font-family:var(--font-mono);}
+  .changelog-date{color:var(--text-dim); font-weight:400; font-size:12px; margin-left:8px; font-family:var(--font-mono);}
   #changelogList ul{margin:6px 0 0; padding-left:18px;}
   #changelogList li{margin-bottom:4px; font-size:14px;}
 
@@ -108,8 +115,8 @@
   table.case-list th, table.case-list td{padding:8px 6px; border-bottom:1px solid var(--border-soft); text-align:left; vertical-align:middle;}
   table.case-list tr.case-row{cursor:pointer;}
   table.case-list tr.case-row:hover{background:var(--panel2);}
-  .badge-onhold{background:var(--warn); color:#25200a; border:none;}
-  .badge-priority{background:var(--err); color:#2a0e08; border:none; margin-left:4px;}
+  .badge-onhold{background:transparent; border-color:var(--warn); color:var(--warn);}
+  .badge-priority{background:transparent; border-color:var(--err); color:var(--err); margin-left:4px;}
 
   .type-card{margin-bottom:20px;}
   .type-card h2{margin:0 0 10px; font-size:16px;}
@@ -121,8 +128,11 @@
   .case-row-top{font-size:14px; font-weight:600;}
   .case-row-bottom{display:flex; justify-content:space-between; align-items:center; margin-top:4px; gap:10px;}
   .case-row-meta{font-size:12px; color:var(--text-dim);}
-  .case-row-status{font-size:12px; color:var(--text-dim); text-align:right;}
-  .case-row-status.status-priority{color:var(--err); font-weight:700;}
+  .case-row-status{
+    display:inline-block; font-family:var(--font-mono); font-size:11px; letter-spacing:0.04em; text-transform:uppercase;
+    color:var(--text-dim); border:1px solid var(--border-soft); border-radius:var(--radius); padding:2px 7px; white-space:nowrap;
+  }
+  .case-row-status.status-priority{color:var(--err); border-color:var(--err);}
 
   .case-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin-bottom:14px;}
   .case-field{margin-bottom:0;}
@@ -136,6 +146,7 @@
   .case-title{font-size:15px; margin:0 0 16px; color:var(--text-dim);}
   .case-title > div:first-child{color:var(--text); font-weight:600; font-size:16px; margin-bottom:4px;}
   .case-title > div:not(:first-child){margin-top:2px;}
+  .case-title > div:nth-child(2){font-family:var(--font-mono); font-size:13px; letter-spacing:0.02em;}
 
   .case-section{margin-top:24px; padding-top:16px; border-top:1px solid var(--border-soft);}
   .case-section:first-child{margin-top:0; padding-top:0; border-top:none;}
@@ -143,10 +154,10 @@
   .add-row{display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; margin-top:10px;}
   .add-row .field{flex:1; min-width:120px; margin-bottom:0;}
 
-  .add-samples-view{background:var(--panel2); border:1px solid var(--border); border-radius:10px; padding:14px; margin-top:10px; margin-bottom:16px;}
+  .add-samples-view{background:var(--panel2); border:1px solid var(--border); border-radius:var(--radius); padding:14px; margin-top:10px; margin-bottom:16px;}
   .add-samples-view > label{margin-top:12px;}
   .add-samples-view > label:first-of-type{margin-top:4px;}
-  .sample-card{background:var(--panel2); border:1px solid var(--border); border-radius:10px; padding:14px; margin-bottom:12px;}
+  .sample-card{background:var(--panel2); border:1px solid var(--border); border-radius:var(--radius); padding:14px; margin-bottom:12px;}
   .sample-card-header{display:flex; justify-content:space-between; align-items:center; cursor:pointer;}
   .action-row{display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; padding:8px 0; border-bottom:1px solid var(--border-soft); font-size:13px;}
   .action-row:last-child{border-bottom:none;}
@@ -157,10 +168,10 @@
   .value-row{display:flex; gap:6px; margin-bottom:6px;}
   .value-row input{font-size:12px; padding:6px 8px;}
 
-  .note-item{background:var(--panel2); border:1px solid var(--border); border-radius:10px; padding:12px; margin-bottom:10px;}
+  .note-item{background:var(--panel2); border:1px solid var(--border); border-radius:var(--radius); padding:12px; margin-bottom:10px;}
   .note-item .note-meta{font-size:12px; color:var(--text-dim); margin-bottom:6px;}
   .note-item .note-replies{margin-left:20px; margin-top:10px; border-left:2px solid var(--border-soft); padding-left:12px;}
-  .note-category{display:inline-block; padding:1px 7px; border-radius:8px; background:var(--panel); border:1px solid var(--border); font-size:11px; color:var(--text-dim); margin-left:8px;}
+  .note-category{display:inline-block; padding:2px 7px; border-radius:var(--radius); background:var(--panel); border:1px solid var(--border); font-family:var(--font-mono); font-size:11px; letter-spacing:0.04em; text-transform:uppercase; color:var(--text-dim); margin-left:8px;}
 </style>
 </head>
 <body>
@@ -173,7 +184,7 @@
 
 <header>
   <div class="brand-block" id="headerLogo">
-    <img src="icon.svg?v=0.4.1-t13" alt="">
+    <img src="icon.svg?v=0.4.1-t14" alt="">
     <div class="brand-text">
       <h1>smart-lab</h1>
       <span class="version-sub" id="versionBadge"></span>
@@ -427,13 +438,13 @@
   </div>
 </div>
 
-<script type="module" src="js/auth-ui.js?v=0.4.1-t13"></script>
-<script type="module" src="js/admin-ui.js?v=0.4.1-t13"></script>
-<script type="module" src="js/case-types-ui.js?v=0.4.1-t13"></script>
-<script type="module" src="js/clients-ui.js?v=0.4.1-t13"></script>
-<script type="module" src="js/cases.js?v=0.4.1-t13"></script>
-<script type="module" src="js/client-view.js?v=0.4.1-t13"></script>
-<script type="module" src="js/update-banner.js?v=0.4.1-t13"></script>
-<script type="module" src="js/changelog.js?v=0.4.1-t13"></script>
+<script type="module" src="js/auth-ui.js?v=0.4.1-t14"></script>
+<script type="module" src="js/admin-ui.js?v=0.4.1-t14"></script>
+<script type="module" src="js/case-types-ui.js?v=0.4.1-t14"></script>
+<script type="module" src="js/clients-ui.js?v=0.4.1-t14"></script>
+<script type="module" src="js/cases.js?v=0.4.1-t14"></script>
+<script type="module" src="js/client-view.js?v=0.4.1-t14"></script>
+<script type="module" src="js/update-banner.js?v=0.4.1-t14"></script>
+<script type="module" src="js/changelog.js?v=0.4.1-t14"></script>
 </body>
 </html>
