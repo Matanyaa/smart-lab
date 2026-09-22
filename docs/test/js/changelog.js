@@ -29,7 +29,9 @@ const CHANGELOG = [
       'New: case types and client/client-org lookups, used when creating a case.',
       'Clients can now log in to see their own cases’ status.',
       'Case manager is optional when creating a case, and cases can be deleted at any stage.',
-      'Clearer "+ New case" button that shows when it’s open.'
+      'Clearer "+ New case" button that shows when it’s open.',
+      'Case view: Notes and Edit are now icon buttons at the top, and you can delete a case from there or right from the case list, without opening it first.',
+      'Case header now shows the day count, due date, status, and client together on one line.'
     ]
   }
 ];
