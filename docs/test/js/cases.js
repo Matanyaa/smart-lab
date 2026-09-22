@@ -1,18 +1,27 @@
-import { db } from './firebase-init.js?v=0.4.1-t19';
+import { db } from './firebase-init.js?v=0.5.0-t01';
 import {
   collection, doc, getDoc, getDocs, addDoc, updateDoc, deleteDoc, query, where, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { loadCaseTypes, getCachedCaseTypes, findCaseTypeById } from './case-types-ui.js?v=0.4.1-t19';
+import { loadCaseTypes, getCachedCaseTypes, findCaseTypeById } from './case-types-ui.js?v=0.5.0-t01';
 import {
   loadClientOrgsAndClients, getCachedClientOrgs, getCachedClientsForOrg, fetchClientsForOrg,
   findClientById, findClientOrgById
-} from './clients-ui.js?v=0.4.1-t19';
+} from './clients-ui.js?v=0.5.0-t01';
+import {
+  emptyWorkflow, seedWorkflow, isTaskDone, currentPathOf, updateAtPath, recomputeAdvancement
+} from './workflow.js?v=0.5.0-t01';
 
 // ---------------------------------------------------------------------
-// Core case/sample/action model (0.4.1 redesign -- see SPEC.md's "Case
-// lifecycle" / "Case model"). Internal to the lab team -- admin has zero
-// rule-level access to any of this now (see setup/firestore.rules), and
-// clients get their own, separately-scoped read-only view (client-view.js).
+// Core case/sample/workflow model. Internal to the lab team -- admin has
+// zero rule-level access to any of this now (see setup/firestore.rules),
+// and clients get their own, separately-scoped read-only view
+// (client-view.js). 0.5.0 replaced the fixed new/lab/write/archive/done
+// stage enum and per-sample actions with the generic Workflow/Action/Task
+// primitive (see workflow.js and SPEC.md's "The Workflow / Action / Task
+// primitive") -- a case now has one top-level Workflow, and samples are
+// pure item/zone/name structure with no actions of their own (a task gets
+// tagged with which sample(s)/zone(s) it applies to live, at execution
+// time, not the other way around).
 // ---------------------------------------------------------------------
 
 const casesScreen = document.getElementById('casesScreen');
@@ -44,7 +53,7 @@ let infoEditMode = false;
 let expandedSamples = new Set();
 let editingSamples = new Set();
 let notesShown = false;
-let viewedStage = null; // null = follow the case's real current stage
+let viewedPath = null; // null = follow the workflow's real current path (see workflow.js's currentPathOf)
 
 export function hideCasesScreen() {
   casesScreen.classList.add('hidden');
@@ -157,10 +166,6 @@ newCaseClientOrgSelect.addEventListener('change', async () => {
   });
 });
 
-function defaultArchivingWorkflow(template) {
-  return (template || []).map((item) => ({ name: item.name, order: item.order, status: 'pending', executedBy: null, executedAt: null }));
-}
-
 newCaseForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   newCaseError.textContent = '';
@@ -183,17 +188,17 @@ newCaseForm.addEventListener('submit', async (e) => {
       caseManager: newCaseManagerSelect.value || null,
       openedBy: myProfile.username,
       caseType: newCaseTypeSelect.value || null,
-      stage: 'new',
-      writingStage: null,
       onHold: false,
       highPriority: false,
       showResearchToClient: false,
       dueDateOverride: null,
-      // Snapshotted from the case type at creation time -- a later edit or
-      // deletion of the case type itself doesn't retroactively change an
-      // already-created case's own workflow content.
-      labWorkflowTemplate: caseType ? (caseType.labWorkflowTemplate || []) : [],
-      archivingWorkflow: defaultArchivingWorkflow(caseType ? caseType.archivingWorkflowTemplate : [])
+      // 0.5.0: replaces stage/writingStage/labWorkflowTemplate/
+      // archivingWorkflow entirely -- a case now has exactly one top-level
+      // Workflow, deep-copied from its case type's authored template at
+      // creation time (empty if the case type has none, or none picked).
+      // A later edit to the case type itself doesn't retroactively change
+      // an already-created case's own copy.
+      workflow: seedWorkflow(caseType ? caseType.workflowTemplate : null)
     });
     newCaseForm.reset();
     newCaseForm.classList.add('hidden');
@@ -204,15 +209,6 @@ newCaseForm.addEventListener('submit', async (e) => {
     newCaseError.textContent = `Couldn't create case: ${err.message}`;
   }
 });
-
-const STAGE_LABELS = { new: 'New', lab: 'Lab', write: 'Write', archive: 'Archive', done: 'Done' };
-const STAGE_ORDER = ['new', 'lab', 'write', 'archive', 'done'];
-function stageLabel(stage) { return STAGE_LABELS[stage] || stage; }
-
-const WRITING_LABELS = {
-  draft: 'Draft', leaderReview: 'Leader review', secondDraft: 'Second draft',
-  orgManagerReview: 'Org manager review', published: 'Published'
-};
 
 // ---------------------------------------------------------------------
 // Derived display fields -- see SPEC.md's "Case model" > "Derived /
@@ -236,6 +232,16 @@ function dueDateOf(c) {
   d.setDate(d.getDate() + ct.tatGoalDays);
   return d.toISOString().slice(0, 10);
 }
+// 0.5.0: there's no fixed stage enum anymore -- a case's "stage" is just
+// whichever top-level Workflow item its workflow.currentIndex points at,
+// named however admin named it (see workflow.js's currentPathOf/
+// recomputeAdvancement).
+function currentTopLevelLabel(c) {
+  const items = (c.workflow && c.workflow.items) || [];
+  if (items.length === 0) return 'No workflow';
+  const idx = Math.min(c.workflow.currentIndex || 0, items.length - 1);
+  return items[idx].name;
+}
 // On-hold/research act as the status itself (replacing the plain stage
 // name) rather than separate tags -- at the user's request, since a case
 // that's on hold or under research isn't really "in New/Lab/..." in any
@@ -244,7 +250,7 @@ function dueDateOf(c) {
 // is somehow both on hold and flagged for research, since "on hold" is
 // the more blocking of the two states.
 function effectiveStatusText(c) {
-  const base = c.onHold ? 'On hold' : c.showResearchToClient ? 'Research' : stageLabel(c.stage);
+  const base = c.onHold ? 'On hold' : c.showResearchToClient ? 'Research' : currentTopLevelLabel(c);
   return c.highPriority ? `★ ${base}` : base;
 }
 // Header format (0.4.2, revised at the user's direct correction -- the
@@ -262,15 +268,18 @@ function caseHeaderLines(c) {
   return [onameOf(c) || '(unnamed)', line2, clientDisplayText(c) || '—'];
 }
 
-// A plain worker executing/verifying the last action on someone else's
-// case can't write to the case document itself under setup/firestore.rules
-// (update = team_leader or that case's own caseManager only, unchanged
-// from Iteration 4 -- see TASK.md's rules section #9). Rather than weaken
-// that rule, stage auto-advances only actually fire when the current user
-// is allowed to; otherwise they're caught up opportunistically the next
-// time an authorized user (the case's team leader or manager) opens the
-// case -- see the catch-up call in openCaseDetail. Logged as a judgment
-// call in HANDOFF.md.
+// Gates the case's own info fields (name/dates/client/etc.) and deletion --
+// unchanged in spirit from 0.4.1. Executing/verifying workflow tasks is
+// NOT gated by this (see setup/firestore.rules' new case-update rule):
+// under 0.5.0, a task's fields live inside the case doc's own `workflow`
+// field rather than a separate staff-writable subcollection, so a plain
+// case-staff member who isn't the case manager still needs to be able to
+// write that one field even though they can't touch the rest of the case
+// doc -- the rule allows any case-staff write as long as `workflow` is the
+// only field that changed. This also retires 0.4.1's "auto-advance only
+// fires for whoever's allowed to write the case doc, otherwise it's caught
+// up next time an authorized user opens the case" workaround entirely --
+// every case-staff member can now always save their own advancement.
 function canUpdateCase(c) {
   return myProfile.role === 'team_leader' || c.caseManager === myProfile.username;
 }
@@ -469,7 +478,7 @@ async function openCaseDetail(caseId) {
   infoEditMode = false;
   expandedSamples = new Set();
   notesShown = false;
-  viewedStage = null;
+  viewedPath = null;
   toggleNotesBtn.classList.remove('active');
   toggleNotesBtn.title = 'Notes';
   toggleNotesBtn.setAttribute('aria-label', 'Notes');
@@ -488,14 +497,6 @@ async function saveCaseField(caseId, field, value) {
   await updateDoc(doc(db, 'test_cases', caseId), { [field]: value });
 }
 
-// Catches up any stage transition a plain worker couldn't itself write
-// (see canUpdateCase above), plus runs the ordinary auto-advance checks.
-async function runAutoAdvanceChecks(caseId, c, samples) {
-  if (!canUpdateCase(c)) return;
-  if (c.stage === 'lab') await maybeAutoAdvanceToWrite(caseId, samples);
-  if (c.stage === 'archive') await maybeAutoAdvanceToDone(caseId, c);
-}
-
 async function renderCaseDetail(caseId) {
   const caseSnap = await getDoc(doc(db, 'test_cases', caseId));
   if (!caseSnap.exists()) {
@@ -503,36 +504,31 @@ async function renderCaseDetail(caseId) {
     return;
   }
   const c = { id: caseId, ...caseSnap.data() };
+  if (!c.workflow) c.workflow = emptyWorkflow();
 
+  // 0.5.0: samples no longer have their own actions subcollection -- a
+  // task gets tagged against sample(s)/zone(s) live, from inside the
+  // workflow section, instead of a sample owning its own action list. No
+  // more N+1 per-sample fetch here either.
   const samplesSnap = await getDocs(collection(db, 'test_cases', caseId, 'test_samples'));
   const samples = [];
-  for (const sDoc of samplesSnap.docs) {
-    const actionsSnap = await getDocs(collection(db, 'test_cases', caseId, 'test_samples', sDoc.id, 'test_actions'));
-    const actions = [];
-    actionsSnap.forEach((aDoc) => actions.push({ id: aDoc.id, ...aDoc.data() }));
-    samples.push({ id: sDoc.id, ...sDoc.data(), actions });
-  }
+  samplesSnap.forEach((sDoc) => samples.push({ id: sDoc.id, ...sDoc.data() }));
   samples.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 
-  await runAutoAdvanceChecks(caseId, c, samples);
-  // Re-read after a possible auto-advance so the rendered stage is current.
-  const freshSnap = await getDoc(doc(db, 'test_cases', caseId));
-  const cFresh = { id: caseId, ...freshSnap.data() };
-
   caseDetailTitle.innerHTML = '';
-  caseHeaderLines(cFresh).forEach((line) => {
+  caseHeaderLines(c).forEach((line) => {
     const lineEl = document.createElement('div');
     lineEl.textContent = line;
     caseDetailTitle.appendChild(lineEl);
   });
-  editInfoBtn.classList.toggle('hidden', !canUpdateCase(cFresh));
+  editInfoBtn.classList.toggle('hidden', !canUpdateCase(c));
   editInfoBtn.classList.toggle('active', infoEditMode);
   deleteCaseBtn.classList.toggle('hidden', myProfile.role !== 'team_leader');
   caseMainView.innerHTML = '';
-  const infoSection = buildInfoSection(cFresh);
+  const infoSection = buildInfoSection(c);
   if (infoSection) caseMainView.appendChild(infoSection);
-  caseMainView.appendChild(buildWorkflowSection(cFresh, samples));
-  caseMainView.appendChild(buildSamplesSection(cFresh, samples));
+  caseMainView.appendChild(buildWorkflowSection(c, samples));
+  caseMainView.appendChild(buildSamplesSection(c, samples));
 }
 
 // ---------------------------------------------------------------------
@@ -694,87 +690,58 @@ function textField(labelText, value, type, onSave) {
 }
 
 // ---------------------------------------------------------------------
-// Workflow section -- the case's own stage progress (new -> lab -> write
-// -> archive -> done), the write stage's nested writing workflow, the
-// archiving workflow's items, and case deletion (any stage, team-leader
-// judgment call -- see SPEC.md's "Case lifecycle").
+// Workflow section (0.5.0 rebuild) -- renders whatever the case's own
+// top-level Workflow actually contains, recursing into nested Actions,
+// down to whichever Task is being viewed. See workflow.js for the
+// underlying primitive and SPEC.md's "The Workflow / Action / Task
+// primitive" for the design this replaces the old fixed New/Lab/Write/
+// Archive/Done + writing/archiving-workflow machinery with entirely.
 // ---------------------------------------------------------------------
-function isActionComplete(a) {
-  return a.status === true && (a.type !== 'verified' || !!a.verifiedBy);
-}
-
-async function maybeAutoAdvanceToWrite(caseId, samples) {
-  if (samples.length === 0) return;
-  for (const s of samples) {
-    if (s.actions.length === 0) return;
-    for (const a of s.actions) {
-      if (!isActionComplete(a)) return;
-    }
-  }
-  await updateDoc(doc(db, 'test_cases', caseId), { stage: 'write', writingStage: 'draft' });
-}
-
-async function maybeAutoAdvanceToDone(caseId, c) {
-  const items = c.archivingWorkflow || [];
-  if (items.length === 0) return;
-  if (items.every((it) => it.status === 'done')) {
-    await updateDoc(doc(db, 'test_cases', caseId), { stage: 'done' });
-  }
-}
-
-// See canUpdateCase's note above -- adding a sample/action, or reopening
-// a completed one, pulls a case back from `write` to `lab` if it had
-// already auto-advanced there (SPEC.md's reversibility rule). Only fires
-// for whoever's allowed to write to the case doc; otherwise it's caught
-// up next time an authorized user opens the case (same pattern as the
-// forward auto-advances above).
-async function reopenToLabIfNeeded(caseId) {
-  const snap = await getDoc(doc(db, 'test_cases', caseId));
-  if (!snap.exists()) return;
-  const c = snap.data();
-  if (c.stage === 'write' && canUpdateCase({ id: caseId, ...c })) {
-    await updateDoc(doc(db, 'test_cases', caseId), { stage: 'lab', writingStage: null });
-  }
-}
-
-// Stage flow: a row of named, clickable circles (New/Lab/Write/Archive/
-// Done), at the user's request replacing the plain "Workflow — {stage}"
-// text heading. Clicking a circle sets `viewedStage` and re-renders --
-// this only changes which stage's panel is *displayed* below, never the
-// case's real `stage` field. The real current stage still drives which
-// panel shows its live, interactive controls (see buildWorkflowSection);
-// any other circle shows a read-only preview instead, so browsing past/
-// future stages can't accidentally trigger a real transition out of turn.
-function buildStageFlow(c, effectiveViewed) {
-  const wrap = document.createElement('div');
-  wrap.className = 'stage-flow';
-  const currentIdx = STAGE_ORDER.indexOf(c.stage);
-  STAGE_ORDER.forEach((stage, idx) => {
-    if (idx > 0) {
-      const line = document.createElement('div');
-      line.className = 'stage-flow-line';
-      if (idx <= currentIdx) line.classList.add('done');
-      wrap.appendChild(line);
-    }
-    const node = document.createElement('button');
-    node.type = 'button';
-    node.className = 'stage-flow-node';
-    if (idx < currentIdx) node.classList.add('done');
-    if (stage === c.stage) node.classList.add('current');
-    if (stage === effectiveViewed) node.classList.add('viewed');
-    node.textContent = stageLabel(stage);
-    node.title = stageLabel(stage) + (stage === c.stage ? ' (current stage)' : '');
-    if (stage === c.stage) node.setAttribute('aria-current', 'step');
-    node.addEventListener('click', () => { viewedStage = stage; renderCaseDetail(c.id); });
-    wrap.appendChild(node);
-  });
-  return wrap;
-}
-
 function readonlyNote(text) {
   const p = document.createElement('p'); p.className = 'muted';
   p.textContent = text;
   return p;
+}
+
+// Long-press (phone) / right-click (desktop) -- same gesture and timing
+// already used for the header logo's jump-to-test/root gesture in
+// auth-ui.js, reused here for the stage-circle force-jump.
+function attachLongPress(el, callback) {
+  el.addEventListener('contextmenu', (e) => { e.preventDefault(); callback(); });
+  let timer = null;
+  el.addEventListener('touchstart', () => { timer = setTimeout(callback, 600); });
+  ['touchend', 'touchmove', 'touchcancel'].forEach((evt) => el.addEventListener(evt, () => clearTimeout(timer)));
+}
+
+// Long-press a stage circle -> confirm popover -> forces workflowLike's own
+// currentIndex to `idx` regardless of whether the automatic advancement
+// condition is actually met (SPEC.md's "Manual override"). A plain tap
+// only ever *previews* (see buildWorkflowLevel) -- this is the one real
+// way to move backward, since recomputeAdvancement itself is forward-only.
+function attachForceJump(btn, anchorEl, c, ancestorPath, idx, targetLabel) {
+  attachLongPress(btn, () => {
+    if (anchorEl.querySelector('.confirm-row')) return;
+    const confirmRow = document.createElement('div');
+    confirmRow.className = 'confirm-row';
+    confirmRow.style.cssText = 'position:absolute; left:0; top:66px; background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:10px; width:230px; z-index:5;';
+    const msg = document.createElement('p'); msg.className = 'error'; msg.style.margin = '0 0 8px';
+    msg.textContent = `Jump to "${targetLabel}" now, skipping the normal order?`;
+    const confirmBtn = document.createElement('button');
+    confirmBtn.type = 'button'; confirmBtn.className = 'btn btn-small btn-primary'; confirmBtn.textContent = 'Jump';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button'; cancelBtn.className = 'btn btn-small'; cancelBtn.textContent = 'Cancel'; cancelBtn.style.marginLeft = '8px';
+    cancelBtn.addEventListener('click', () => confirmRow.remove());
+    confirmBtn.addEventListener('click', async () => {
+      confirmBtn.disabled = true;
+      const updated = updateAtPath(c.workflow, ancestorPath, (level) => ({ ...level, currentIndex: idx }));
+      recomputeAdvancement(updated);
+      await updateDoc(doc(db, 'test_cases', c.id), { workflow: updated });
+      viewedPath = [...ancestorPath, idx];
+      await renderCaseDetail(c.id);
+    });
+    confirmRow.append(msg, confirmBtn, cancelBtn);
+    anchorEl.appendChild(confirmRow);
+  });
 }
 
 function buildWorkflowSection(c, samples) {
@@ -784,194 +751,261 @@ function buildWorkflowSection(c, samples) {
   h3.textContent = 'Workflow';
   section.appendChild(h3);
 
-  const effectiveViewed = viewedStage || c.stage;
-  section.appendChild(buildStageFlow(c, effectiveViewed));
-
-  const editAllowed = canUpdateCase(c);
-  const isCurrentStage = effectiveViewed === c.stage;
-
-  if (effectiveViewed === 'new') {
-    if (!isCurrentStage) {
-      section.appendChild(readonlyNote(c.startDate ? `Case opened ${c.startDate}.` : 'Case opened here.'));
-    } else {
-      if (samples.length === 0) {
-        section.appendChild(readonlyNote('Add at least one sample before starting lab.'));
-      }
-      // Exits `new` via an explicit team-leader confirmation only -- not
-      // gated on field-completeness (SPEC.md's "Case lifecycle").
-      if (myProfile.role === 'team_leader') {
-        const btn = document.createElement('button');
-        btn.className = 'btn btn-primary'; btn.textContent = 'Start lab';
-        btn.disabled = samples.length === 0;
-        btn.addEventListener('click', async () => {
-          await updateDoc(doc(db, 'test_cases', c.id), { stage: 'lab' });
-          await renderCaseDetail(c.id);
-        });
-        section.appendChild(btn);
-      }
-    }
-  } else if (effectiveViewed === 'lab') {
-    // Aggregate summary is safe to show regardless of stage (no buttons).
-    // The actual per-sample action list -- execute/verify/reopen, add
-    // action -- is the real action-execution surface (moved here from the
-    // samples section entirely, per the user's request via TASK.md) and
-    // only renders when lab is genuinely the case's current stage, same
-    // read-only-elsewhere rule as every other stage's live controls.
-    const totalActions = samples.reduce((sum, s) => sum + s.actions.length, 0);
-    const doneActions = samples.reduce((sum, s) => sum + s.actions.filter(isActionComplete).length, 0);
-    const completeSamples = samples.filter((s) => s.actions.length > 0 && s.actions.every(isActionComplete)).length;
-    section.appendChild(readonlyNote(`${completeSamples}/${samples.length} samples complete (${doneActions}/${totalActions} actions done). Moves to Write automatically once every sample's actions are done (verified-type actions need sign-off too).`));
-    if (isCurrentStage) {
-      samples.forEach((s) => section.appendChild(buildSampleActionsCard(c, s)));
-    } else if (samples.length > 0) {
-      section.appendChild(readonlyNote("This isn't the case's current stage -- actions can only be executed or verified while Lab is active."));
-    }
-  } else if (effectiveViewed === 'write') {
-    if (c.writingStage == null) {
-      section.appendChild(readonlyNote('Not reached yet.'));
-    } else if (isCurrentStage) {
-      section.appendChild(buildWritingWorkflow(c, editAllowed));
-    } else {
-      section.appendChild(readonlyNote(`Writing stage: ${WRITING_LABELS[c.writingStage] || c.writingStage}`));
-    }
-  } else if (effectiveViewed === 'archive') {
-    // buildArchivingWorkflow(c, false) already suppresses every button
-    // (remove/mark-done/add-step) -- reused as-is for the read-only
-    // preview, real interactive controls only when archive is current.
-    section.appendChild(buildArchivingWorkflow(c, isCurrentStage && editAllowed));
-  } else if (effectiveViewed === 'done') {
-    section.appendChild(readonlyNote(isCurrentStage ? 'This case is done.' : 'Not reached yet.'));
+  if (!c.workflow.items || c.workflow.items.length === 0) {
+    section.appendChild(readonlyNote('No workflow defined for this case type yet.'));
+    return section;
   }
 
+  if (!viewedPath) viewedPath = currentPathOf(c.workflow);
+  section.appendChild(buildWorkflowLevel(c, c.workflow, [], samples, true));
   return section;
 }
 
-// Provisional simplification per SPEC.md, flagged there as not fully
-// confirmed: "back" from either review is a plain two-step loop (revise,
-// then re-review), no hard cap, and org-manager-review's back is assumed
-// to land on secondDraft (same as leaderReview's back), matching "same as
-// leader review's back" in SPEC.md.
-function buildWritingWorkflow(c, editAllowed) {
+// One items[]-bearing level (the case's own top-level Workflow, or any
+// nested Action's own items) -- a circle strip (reusing the same
+// stage-flow visual device 0.4.1 built for the fixed 5-stage case, now
+// applied at every nesting depth) plus whichever child is being viewed
+// below it. `ancestorLive` threads down whether every ancestor level was
+// ALSO pointing at its own real current item -- a Task's controls only go
+// live when the *entire* path from the root matches the workflow's real
+// current path, otherwise it's a read-only preview (0.4.1's
+// read-only-elsewhere rule, generalized to arbitrary depth).
+function buildWorkflowLevel(c, workflowLike, ancestorPath, samples, ancestorLive) {
   const wrap = document.createElement('div');
-  const p = document.createElement('p'); p.className = 'muted';
-  p.textContent = `Writing stage: ${WRITING_LABELS[c.writingStage] || c.writingStage}`;
-  wrap.appendChild(p);
+  wrap.className = 'workflow-level';
 
-  if (!editAllowed) return wrap;
+  const realCurrentIdx = Math.min(workflowLike.currentIndex || 0, workflowLike.items.length - 1);
+  const viewedIdx = viewedPath.length > ancestorPath.length ? viewedPath[ancestorPath.length] : realCurrentIdx;
 
-  async function setWritingStage(stage) {
-    await updateDoc(doc(db, 'test_cases', c.id), { writingStage: stage });
-    await renderCaseDetail(c.id);
+  const flow = document.createElement('div'); flow.className = 'stage-flow';
+  workflowLike.items.forEach((node, idx) => {
+    if (idx > 0) {
+      const line = document.createElement('div');
+      line.className = 'stage-flow-line';
+      if (idx <= realCurrentIdx) line.classList.add('done');
+      flow.appendChild(line);
+    }
+    const nodePath = [...ancestorPath, idx];
+    const btn = document.createElement('button');
+    btn.type = 'button'; btn.className = 'stage-flow-node';
+    if (idx < realCurrentIdx) btn.classList.add('done');
+    if (idx === realCurrentIdx) btn.classList.add('current');
+    if (idx === viewedIdx) btn.classList.add('viewed');
+    btn.textContent = node.name;
+    btn.title = node.name + (idx === realCurrentIdx ? ' (current -- long-press/right-click any circle to force-jump)' : '');
+    if (idx === realCurrentIdx) btn.setAttribute('aria-current', 'step');
+    btn.addEventListener('click', () => { viewedPath = nodePath; renderCaseDetail(c.id); });
+    attachForceJump(btn, flow, c, ancestorPath, idx, node.name);
+    flow.appendChild(btn);
+  });
+  wrap.appendChild(flow);
+
+  const viewedNode = workflowLike.items[viewedIdx];
+  const isLiveHere = ancestorLive && viewedIdx === realCurrentIdx;
+
+  if (viewedNode.kind === 'action') {
+    if (!viewedNode.items || viewedNode.items.length === 0) {
+      wrap.appendChild(readonlyNote(`${viewedNode.name}: no steps yet.`));
+    } else {
+      wrap.appendChild(buildWorkflowLevel(c, viewedNode, [...ancestorPath, viewedIdx], samples, isLiveHere));
+    }
+  } else {
+    wrap.appendChild(buildTaskPanel(c, viewedNode, [...ancestorPath, viewedIdx], samples, isLiveHere));
   }
-  async function publish() {
-    await updateDoc(doc(db, 'test_cases', c.id), { writingStage: 'published', stage: 'archive' });
-    await renderCaseDetail(c.id);
-  }
 
-  const btnRow = document.createElement('div');
-  btnRow.style.display = 'flex'; btnRow.style.gap = '8px'; btnRow.style.flexWrap = 'wrap';
-
-  if (c.writingStage === 'draft') {
-    const btn = document.createElement('button'); btn.className = 'btn btn-primary'; btn.textContent = 'Send to leader review';
-    btn.addEventListener('click', () => setWritingStage('leaderReview'));
-    btnRow.appendChild(btn);
-  } else if (c.writingStage === 'leaderReview') {
-    const back = document.createElement('button'); back.className = 'btn'; back.textContent = 'Back to draft (revise)';
-    back.addEventListener('click', () => setWritingStage('draft'));
-    const advance = document.createElement('button'); advance.className = 'btn btn-primary'; advance.textContent = 'Advance to second draft';
-    advance.addEventListener('click', () => setWritingStage('secondDraft'));
-    btnRow.append(back, advance);
-  } else if (c.writingStage === 'secondDraft') {
-    const btn = document.createElement('button'); btn.className = 'btn btn-primary'; btn.textContent = 'Send to org manager review';
-    btn.addEventListener('click', () => setWritingStage('orgManagerReview'));
-    btnRow.appendChild(btn);
-  } else if (c.writingStage === 'orgManagerReview') {
-    const back = document.createElement('button'); back.className = 'btn'; back.textContent = 'Back to second draft (revise)';
-    back.addEventListener('click', () => setWritingStage('secondDraft'));
-    const pub = document.createElement('button'); pub.className = 'btn btn-primary'; pub.textContent = 'Publish';
-    pub.addEventListener('click', publish);
-    btnRow.append(back, pub);
-  }
-  wrap.appendChild(btnRow);
   return wrap;
 }
 
-function buildArchivingWorkflow(c, editAllowed) {
-  const wrap = document.createElement('div');
-  const items = c.archivingWorkflow || [];
-  items
-    .map((item, idx) => ({ item, idx }))
-    .sort((a, b) => a.item.order - b.item.order)
-    .forEach(({ item, idx }) => wrap.appendChild(buildArchivingItemRow(c, item, idx, editAllowed)));
+function taskStatusSummary(task) {
+  if (isTaskDone(task)) return 'Done.';
+  if (task.executedBy) return `Executed by ${task.executedBy}${task.isVerifiable && !task.verifiedBy ? ', awaiting verification.' : '.'}`;
+  return 'Not started.';
+}
 
-  if (editAllowed) {
-    const addForm = document.createElement('form');
-    addForm.className = 'add-row';
-    const nameInput = document.createElement('input'); nameInput.placeholder = 'New step name'; nameInput.required = true;
-    const orderInput = document.createElement('input'); orderInput.type = 'number'; orderInput.placeholder = 'Order'; orderInput.style.maxWidth = '80px';
-    const nameField = document.createElement('div'); nameField.className = 'field'; nameField.appendChild(nameInput);
-    const orderField = document.createElement('div'); orderField.className = 'field'; orderField.appendChild(orderInput);
-    const addBtn = document.createElement('button'); addBtn.type = 'submit'; addBtn.className = 'btn btn-small'; addBtn.textContent = 'Add step';
-    addForm.append(nameField, orderField, addBtn);
-    addForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const name = nameInput.value.trim();
-      if (!name) return;
-      const maxOrder = items.length ? Math.max(...items.map((i) => i.order)) : 0;
-      const order = orderInput.value ? parseInt(orderInput.value, 10) : maxOrder + 1;
-      const updated = [...items, { name, order, status: 'pending', executedBy: null, executedAt: null }];
-      await updateDoc(doc(db, 'test_cases', c.id), { archivingWorkflow: updated });
-      await renderCaseDetail(c.id);
-    });
-    wrap.appendChild(addForm);
-  }
+function buildValueSummary(values) {
+  const wrap = document.createElement('p'); wrap.className = 'muted';
+  wrap.textContent = (values && values.length) ? values.map((v) => `${v.name}: ${v.value}`).join(' · ') : '(no values recorded)';
   return wrap;
 }
 
-function buildArchivingItemRow(c, item, idx, editAllowed) {
-  const row = document.createElement('div');
-  row.className = 'action-row';
-  const label = document.createElement('span');
-  label.textContent = item.name + (item.status === 'done' ? ' — done' : '');
-  row.appendChild(label);
+// Live tagging of which sample(s)/zone(s) a task applies to -- a list, set
+// at execution time, not something a sample owns (SPEC.md's "Item / Sample
+// / Zone"). Plain toggle chips rather than a <select multiple> for
+// friendlier touch targets.
+function buildAssignmentEditor(c, task, path, samples) {
+  const wrap = document.createElement('div'); wrap.className = 'task-assignment';
+  const label = document.createElement('label'); label.textContent = 'Samples / zones';
+  wrap.appendChild(label);
 
-  const controls = document.createElement('span');
-  if (editAllowed) {
-    const removeBtn = document.createElement('button');
-    removeBtn.type = 'button'; removeBtn.className = 'btn btn-small'; removeBtn.textContent = 'Remove';
-    removeBtn.addEventListener('click', async () => {
-      const updated = c.archivingWorkflow.filter((_, i) => i !== idx);
-      await updateDoc(doc(db, 'test_cases', c.id), { archivingWorkflow: updated });
-      await renderCaseDetail(c.id);
+  const options = [];
+  samples.forEach((s) => {
+    const base = s.item ? `${s.item} - ${s.name}` : s.name;
+    options.push({ sampleId: s.id, zone: null, label: base });
+    (s.zones || []).forEach((z) => options.push({ sampleId: s.id, zone: z, label: `${base} (${z})` }));
+  });
+  if (options.length === 0) {
+    wrap.appendChild(readonlyNote('No samples yet.'));
+    return wrap;
+  }
+
+  const chipsWrap = document.createElement('div');
+  chipsWrap.style.cssText = 'display:flex; flex-wrap:wrap; gap:6px;';
+  options.forEach((opt) => {
+    const isAssigned = (task.assignedTo || []).some((a) => a.sampleId === opt.sampleId && a.zone === opt.zone);
+    const chip = document.createElement('button');
+    chip.type = 'button'; chip.className = 'btn btn-small' + (isAssigned ? ' active' : '');
+    chip.textContent = opt.label;
+    chip.addEventListener('click', () => {
+      const current = task.assignedTo || [];
+      const exists = current.some((a) => a.sampleId === opt.sampleId && a.zone === opt.zone);
+      const next = exists
+        ? current.filter((a) => !(a.sampleId === opt.sampleId && a.zone === opt.zone))
+        : [...current, { sampleId: opt.sampleId, zone: opt.zone }];
+      saveTaskField(c, path, { assignedTo: next });
     });
-    controls.appendChild(removeBtn);
+    chipsWrap.appendChild(chip);
+  });
+  wrap.appendChild(chipsWrap);
+  return wrap;
+}
 
-    if (item.status !== 'done') {
-      const execBtn = document.createElement('button');
-      execBtn.type = 'button'; execBtn.className = 'btn btn-small btn-primary'; execBtn.textContent = 'Mark done';
-      execBtn.style.marginLeft = '6px';
-      execBtn.addEventListener('click', async () => {
-        const updated = c.archivingWorkflow.map((it, i) => (i === idx ? { ...it, status: 'done', executedBy: myProfile.username, executedAt: new Date() } : it));
-        await updateDoc(doc(db, 'test_cases', c.id), { archivingWorkflow: updated });
-        await renderCaseDetail(c.id);
+// Fills in a task's value-object template: a fixed slot gets one input, a
+// duplicable one starts with one and can add more live ("+ Add another"),
+// per SPEC.md's Task field list. Shared between Execute (executorValues)
+// and Verify (verifierValues, an independent set against the same
+// template, not a copy of the executor's numbers).
+function buildExecuteForm(c, task, path, label, onSave) {
+  const form = document.createElement('div'); form.className = 'task-execute-form';
+  const rowsBySlot = new Map();
+
+  (task.values || []).forEach((slot) => {
+    const slotWrap = document.createElement('div'); slotWrap.className = 'field';
+    const slotLabel = document.createElement('label');
+    slotLabel.textContent = slot.name + (slot.mode === 'duplicable' ? ' (add as many as needed)' : '');
+    slotWrap.appendChild(slotLabel);
+    const inputsWrap = document.createElement('div');
+    slotWrap.appendChild(inputsWrap);
+    const inputs = [];
+    rowsBySlot.set(slot.name, inputs);
+
+    function addInstance() {
+      const row = document.createElement('div'); row.className = 'value-row';
+      const input = document.createElement('input'); input.className = 'mono';
+      row.appendChild(input);
+      if (slot.mode === 'duplicable') {
+        const rm = document.createElement('button'); rm.type = 'button'; rm.className = 'btn btn-small'; rm.textContent = '✕';
+        rm.addEventListener('click', () => { row.remove(); inputs.splice(inputs.indexOf(input), 1); });
+        row.appendChild(rm);
+      }
+      inputsWrap.appendChild(row);
+      inputs.push(input);
+    }
+    addInstance();
+
+    if (slot.mode === 'duplicable') {
+      const addBtn = document.createElement('button');
+      addBtn.type = 'button'; addBtn.className = 'btn btn-small'; addBtn.textContent = '+ Add another';
+      addBtn.addEventListener('click', addInstance);
+      slotWrap.appendChild(addBtn);
+    }
+    form.appendChild(slotWrap);
+  });
+
+  const saveBtn = document.createElement('button');
+  saveBtn.type = 'button'; saveBtn.className = 'btn btn-primary btn-small'; saveBtn.textContent = label;
+  saveBtn.addEventListener('click', async () => {
+    saveBtn.disabled = true;
+    const values = [];
+    rowsBySlot.forEach((inputs, name) => {
+      inputs.forEach((input) => {
+        const v = input.value.trim();
+        if (v) values.push({ name, value: v });
       });
-      controls.appendChild(execBtn);
+    });
+    await onSave(values);
+  });
+  form.appendChild(saveBtn);
+  return form;
+}
+
+async function saveTaskField(c, path, patch) {
+  const updated = updateAtPath(c.workflow, path, (node) => ({ ...node, ...patch }));
+  recomputeAdvancement(updated);
+  await updateDoc(doc(db, 'test_cases', c.id), { workflow: updated });
+  await renderCaseDetail(c.id);
+}
+
+function buildTaskPanel(c, task, path, samples, isLive) {
+  const wrap = document.createElement('div'); wrap.className = 'task-panel';
+  const title = document.createElement('h4'); title.textContent = task.name;
+  wrap.appendChild(title);
+
+  if (!isLive) {
+    wrap.appendChild(readonlyNote(taskStatusSummary(task)));
+    return wrap;
+  }
+
+  // isComplete -- a plain manual toggle that can force a task done
+  // regardless of whether its value objects are filled in (SPEC.md).
+  const completeLabel = document.createElement('label'); completeLabel.className = 'checkbox-inline';
+  const completeInput = document.createElement('input'); completeInput.type = 'checkbox'; completeInput.checked = !!task.isComplete;
+  completeInput.addEventListener('change', () => saveTaskField(c, path, { isComplete: completeInput.checked }));
+  completeLabel.append(completeInput, ' Mark complete');
+  wrap.appendChild(completeLabel);
+
+  wrap.appendChild(buildAssignmentEditor(c, task, path, samples));
+
+  if (!task.executedBy) {
+    // Plain client-side Date, not serverTimestamp() -- the sentinel isn't
+    // supported on a value nested inside an array (this task lives inside
+    // `workflow`'s items[] tree), same constraint 0.4.1's archiving
+    // workflow already hit. Still stored as a real Firestore Timestamp.
+    wrap.appendChild(buildExecuteForm(c, task, path, 'Execute', (values) => saveTaskField(c, path, {
+      executedBy: myProfile.username, executionTimestamp: new Date(), executorValues: values
+    })));
+    return wrap;
+  }
+
+  const execInfo = document.createElement('p'); execInfo.className = 'muted';
+  execInfo.textContent = `Executed by ${task.executedBy}`;
+  wrap.appendChild(execInfo);
+  wrap.appendChild(buildValueSummary(task.executorValues));
+
+  if (task.isVerifiable) {
+    if (task.verifiedBy) {
+      const verInfo = document.createElement('p'); verInfo.className = 'muted';
+      verInfo.textContent = `Verified by ${task.verifiedBy}`;
+      wrap.appendChild(verInfo);
+      wrap.appendChild(buildValueSummary(task.verifierValues));
+    } else if (task.executedBy !== myProfile.username) {
+      wrap.appendChild(buildExecuteForm(c, task, path, 'Verify', (values) => saveTaskField(c, path, {
+        verifiedBy: myProfile.username, verificationTimestamp: new Date(), verifierValues: values
+      })));
+    } else {
+      wrap.appendChild(readonlyNote('(awaiting verification by someone else)'));
     }
   }
-  row.appendChild(controls);
-  return row;
+
+  const reopenBtn = document.createElement('button');
+  reopenBtn.type = 'button'; reopenBtn.className = 'btn btn-small'; reopenBtn.textContent = 'Reopen';
+  reopenBtn.style.marginTop = '10px';
+  reopenBtn.addEventListener('click', () => saveTaskField(c, path, {
+    executedBy: null, executionTimestamp: null, executorValues: [],
+    verifiedBy: null, verificationTimestamp: null, verifierValues: []
+  }));
+  wrap.appendChild(reopenBtn);
+
+  return wrap;
 }
 
-// Firestore doesn't cascade-delete subcollections -- every sample,
-// action, and note doc has to be deleted individually before the case
-// doc itself.
+// Firestore doesn't cascade-delete subcollections -- every sample and note
+// doc has to be deleted individually before the case doc itself. 0.5.0:
+// samples no longer have their own actions subcollection (see workflow.js)
+// -- the case's own `workflow` field goes away automatically with the case
+// doc, nothing extra to clean up there.
 async function deleteCaseCascade(caseId) {
   const samplesSnap = await getDocs(collection(db, 'test_cases', caseId, 'test_samples'));
   for (const sDoc of samplesSnap.docs) {
-    const actionsSnap = await getDocs(collection(db, 'test_cases', caseId, 'test_samples', sDoc.id, 'test_actions'));
-    for (const aDoc of actionsSnap.docs) {
-      await deleteDoc(doc(db, 'test_cases', caseId, 'test_samples', sDoc.id, 'test_actions', aDoc.id));
-    }
     await deleteDoc(doc(db, 'test_cases', caseId, 'test_samples', sDoc.id));
   }
   const notesSnap = await getDocs(collection(db, 'test_cases', caseId, 'notes'));
@@ -982,18 +1016,12 @@ async function deleteCaseCascade(caseId) {
 }
 
 // ---------------------------------------------------------------------
-// Samples + their actions. `item` (renamed from `groupName`, 0.4.1) is
-// the optional label above a sample; `sample` is the only mandatory unit.
-// Each sample has a compact (default) and full (expanded) view.
+// Samples. `item` (renamed from `groupName`, 0.4.1) is the optional label
+// above a sample; `sample` is the only mandatory unit. Each sample has a
+// compact (default) and full (expanded) view. 0.5.0: samples are pure
+// item/zone/name structure with no actions of their own -- see workflow.js
+// and SPEC.md's "Item / Sample / Zone".
 // ---------------------------------------------------------------------
-function defaultSampleActions(template) {
-  return (template && template.length ? template : []).map((t) => ({
-    name: t.name, zone: null, type: t.type || 'simple', notes: '',
-    environment: [], calibration: [], measurements: [],
-    status: false, executedBy: null, executionTimestamp: null,
-    verifiedBy: null, verificationTimestamp: null, verifiedMeasurements: []
-  }));
-}
 
 // Repeatable named-row editor -- one text input per row, used for the
 // batch-add view's sample-name/zone lists and for editing an existing
@@ -1104,12 +1132,8 @@ function buildSamplesSection(c, samples) {
         : [{ item: null, name: itemName }];
 
       for (const entry of entries) {
-        const sampleRef = await addDoc(collection(db, 'test_cases', c.id, 'test_samples'), { item: entry.item, name: entry.name, zones });
-        for (const action of defaultSampleActions(c.labWorkflowTemplate)) {
-          await addDoc(collection(db, 'test_cases', c.id, 'test_samples', sampleRef.id, 'test_actions'), action);
-        }
+        await addDoc(collection(db, 'test_cases', c.id, 'test_samples'), { item: entry.item, name: entry.name, zones });
       }
-      await reopenToLabIfNeeded(c.id);
       await renderCaseDetail(c.id);
     } catch (ex) {
       err.textContent = `Couldn't add sample(s): ${ex.message}`;
@@ -1120,13 +1144,6 @@ function buildSamplesSection(c, samples) {
   samples.forEach((s) => section.appendChild(buildSampleStructureCard(c, s)));
   return section;
 }
-
-// Split 2026-09-22 (at the user's request, via TASK.md): the samples
-// section shows structure only (item/sample/zone) -- no action execution,
-// verification, or status content, which lives exclusively in the
-// workflow section's lab panel now (see buildSampleActionsCard below).
-// Both functions share `expandedSamples` as their expand/collapse state,
-// so expanding a sample in one section expands its counterpart too.
 
 // Duplicate naming (2026-09-22, at the user's request): strips a trailing
 // " (N)" off the sample being duplicated to find its base name, looks at
@@ -1281,11 +1298,7 @@ function buildSampleStructureCard(c, s) {
         await updateDoc(doc(db, 'test_cases', c.id, 'test_samples', s.id), { name: `${s.name} (1)` });
       }
       const newName = await nextDuplicateName(c.id, s.item, s.name);
-      const sampleRef = await addDoc(collection(db, 'test_cases', c.id, 'test_samples'), { item: s.item, name: newName, zones: s.zones || [] });
-      for (const action of defaultSampleActions(c.labWorkflowTemplate)) {
-        await addDoc(collection(db, 'test_cases', c.id, 'test_samples', sampleRef.id, 'test_actions'), action);
-      }
-      await reopenToLabIfNeeded(c.id);
+      await addDoc(collection(db, 'test_cases', c.id, 'test_samples'), { item: s.item, name: newName, zones: s.zones || [] });
       await renderCaseDetail(c.id);
     } catch (ex) {
       duplicateBtn.disabled = false;
@@ -1306,7 +1319,7 @@ function buildSampleStructureCard(c, s) {
       confirmRow.className = 'confirm-row';
       confirmRow.style.cssText = 'position:absolute; left:0; top:34px; background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:10px; width:240px; z-index:5;';
       const msg = document.createElement('p'); msg.className = 'error'; msg.style.margin = '0 0 8px';
-      msg.textContent = 'Delete this sample and its actions?';
+      msg.textContent = 'Delete this sample?';
       const confirmBtn = document.createElement('button');
       confirmBtn.type = 'button'; confirmBtn.className = 'btn btn-small btn-primary'; confirmBtn.textContent = 'Confirm';
       const cancelBtn = document.createElement('button');
@@ -1314,10 +1327,9 @@ function buildSampleStructureCard(c, s) {
       cancelBtn.addEventListener('click', () => confirmRow.remove());
       confirmBtn.addEventListener('click', async () => {
         confirmBtn.disabled = true;
-        const actionsSnap = await getDocs(collection(db, 'test_cases', c.id, 'test_samples', s.id, 'test_actions'));
-        for (const aDoc of actionsSnap.docs) {
-          await deleteDoc(doc(db, 'test_cases', c.id, 'test_samples', s.id, 'test_actions', aDoc.id));
-        }
+        // 0.5.0: no more per-sample actions subcollection to cascade --
+        // deleting the sample doc is the whole operation now (see
+        // workflow.js/deleteCaseCascade's comment).
         await deleteDoc(doc(db, 'test_cases', c.id, 'test_samples', s.id));
         expandedSamples.delete(s.id);
         await renderCaseDetail(c.id);
@@ -1330,216 +1342,6 @@ function buildSampleStructureCard(c, s) {
   card.appendChild(actionsRow);
 
   return card;
-}
-
-// Workflow-section counterpart: a sample's actions (execute/verify/reopen)
-// plus the "add action" form -- the entire action-execution surface that
-// used to live inline in the samples section. No zones, no delete-sample
-// here; those stay purely structural (see buildSampleStructureCard).
-function buildSampleActionsCard(c, s) {
-  const card = document.createElement('div');
-  card.className = 'sample-card';
-  const expanded = expandedSamples.has(s.id);
-
-  const header = document.createElement('div');
-  header.className = 'sample-card-header';
-  const title = document.createElement('strong');
-  title.textContent = s.item ? `${s.item} - ${s.name}` : s.name;
-  const doneCount = s.actions.filter(isActionComplete).length;
-  const countSpan = document.createElement('span');
-  countSpan.className = 'muted';
-  countSpan.textContent = `${doneCount}/${s.actions.length} done ${expanded ? '▲' : '▼'}`;
-  header.append(title, countSpan);
-  header.addEventListener('click', () => {
-    if (expandedSamples.has(s.id)) expandedSamples.delete(s.id); else expandedSamples.add(s.id);
-    renderCaseDetail(c.id);
-  });
-  card.appendChild(header);
-
-  if (!expanded) return card;
-
-  s.actions.forEach((a) => card.appendChild(buildActionRow(c, s, a)));
-
-  const addForm = document.createElement('form');
-  addForm.className = 'add-row';
-  const nameInput = document.createElement('input'); nameInput.placeholder = 'Action name'; nameInput.required = true;
-  const nameField = document.createElement('div'); nameField.className = 'field'; nameField.appendChild(nameInput);
-  addForm.appendChild(nameField);
-
-  const typeSelect = document.createElement('select');
-  ['simple', 'verified'].forEach((t) => {
-    const opt = document.createElement('option'); opt.value = t; opt.textContent = t;
-    typeSelect.appendChild(opt);
-  });
-  const typeField = document.createElement('div'); typeField.className = 'field'; typeField.appendChild(typeSelect);
-  addForm.appendChild(typeField);
-
-  let zoneSelect = null;
-  if (s.zones && s.zones.length) {
-    zoneSelect = document.createElement('select');
-    const noneOpt = document.createElement('option'); noneOpt.value = ''; noneOpt.textContent = '(whole sample)';
-    zoneSelect.appendChild(noneOpt);
-    s.zones.forEach((z) => {
-      const opt = document.createElement('option'); opt.value = z; opt.textContent = z;
-      zoneSelect.appendChild(opt);
-    });
-    const zoneField = document.createElement('div'); zoneField.className = 'field'; zoneField.appendChild(zoneSelect);
-    addForm.appendChild(zoneField);
-  }
-
-  const addActionBtn = document.createElement('button');
-  addActionBtn.type = 'submit'; addActionBtn.className = 'btn btn-small'; addActionBtn.textContent = 'Add action';
-  addForm.appendChild(addActionBtn);
-  card.appendChild(addForm);
-
-  addForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const name = nameInput.value.trim();
-    if (!name) return;
-    const zone = zoneSelect && zoneSelect.value ? zoneSelect.value : null;
-    await addDoc(collection(db, 'test_cases', c.id, 'test_samples', s.id, 'test_actions'), {
-      name, zone, type: typeSelect.value, notes: '',
-      environment: [], calibration: [], measurements: [],
-      status: false, executedBy: null, executionTimestamp: null,
-      verifiedBy: null, verificationTimestamp: null, verifiedMeasurements: []
-    });
-    await reopenToLabIfNeeded(c.id);
-    await renderCaseDetail(c.id);
-  });
-
-  return card;
-}
-
-// ---------------------------------------------------------------------
-// value list editor: {name, actualValue, units} rows, used for
-// environment / calibration / measurements / verifiedMeasurements.
-// ---------------------------------------------------------------------
-function buildValueListEditor(label, initialValues) {
-  const wrap = document.createElement('div');
-  wrap.className = 'value-list';
-  const l = document.createElement('label'); l.textContent = label;
-  wrap.appendChild(l);
-  const rows = document.createElement('div');
-  wrap.appendChild(rows);
-
-  function addRow(v) {
-    const row = document.createElement('div'); row.className = 'value-row';
-    const nameI = document.createElement('input'); nameI.placeholder = 'name'; nameI.value = v?.name || '';
-    const actualI = document.createElement('input'); actualI.className = 'mono'; actualI.placeholder = 'value'; actualI.value = v?.actualValue || '';
-    const unitsI = document.createElement('input'); unitsI.className = 'mono'; unitsI.placeholder = 'units'; unitsI.value = v?.units || '';
-    const rmBtn = document.createElement('button'); rmBtn.type = 'button'; rmBtn.className = 'btn btn-small'; rmBtn.textContent = '✕';
-    rmBtn.addEventListener('click', () => row.remove());
-    row.append(nameI, actualI, unitsI, rmBtn);
-    rows.appendChild(row);
-  }
-  (initialValues || []).forEach(addRow);
-
-  const addBtn = document.createElement('button');
-  addBtn.type = 'button'; addBtn.className = 'btn btn-small'; addBtn.textContent = `+ Add ${label.toLowerCase()} row`;
-  addBtn.addEventListener('click', () => addRow(null));
-  wrap.appendChild(addBtn);
-
-  wrap.getValues = () => Array.from(rows.children).map((row) => {
-    const [nameI, actualI, unitsI] = row.querySelectorAll('input');
-    return { name: nameI.value.trim(), actualValue: actualI.value.trim(), units: unitsI.value.trim() };
-  }).filter((v) => v.name || v.actualValue || v.units);
-
-  return wrap;
-}
-
-function buildActionRow(c, s, a) {
-  const row = document.createElement('div');
-  row.className = 'action-row';
-
-  const label = document.createElement('span');
-  label.textContent = `${a.name}${a.zone ? ` (${a.zone})` : ''} [${a.type}]` + (a.status ? ' — done' : '');
-  row.appendChild(label);
-
-  if (!a.status) {
-    const execBtn = document.createElement('button');
-    execBtn.type = 'button'; execBtn.className = 'btn btn-small'; execBtn.textContent = 'Execute';
-    row.appendChild(execBtn);
-    execBtn.addEventListener('click', () => {
-      if (row.querySelector('.execute-form')) return;
-      const form = document.createElement('div');
-      form.className = 'execute-form'; form.style.marginTop = '8px'; form.style.width = '100%';
-      const notesInput = document.createElement('input'); notesInput.placeholder = 'Notes';
-      const envEditor = buildValueListEditor('Environment', a.environment);
-      const calEditor = buildValueListEditor('Calibration', a.calibration);
-      const measEditor = buildValueListEditor('Measurements', a.measurements);
-      const saveBtn = document.createElement('button');
-      saveBtn.className = 'btn btn-small btn-primary'; saveBtn.textContent = 'Save'; saveBtn.style.marginTop = '6px';
-      form.append(notesInput, envEditor, calEditor, measEditor, saveBtn);
-      row.appendChild(form);
-      saveBtn.addEventListener('click', async () => {
-        saveBtn.disabled = true;
-        await updateDoc(doc(db, 'test_cases', c.id, 'test_samples', s.id, 'test_actions', a.id), {
-          notes: notesInput.value,
-          environment: envEditor.getValues(),
-          calibration: calEditor.getValues(),
-          measurements: measEditor.getValues(),
-          status: true,
-          executedBy: myProfile.username,
-          executionTimestamp: serverTimestamp()
-        });
-        await renderCaseDetail(c.id);
-      });
-    });
-    return row;
-  }
-
-  const info = document.createElement('span'); info.className = 'muted';
-  info.textContent = `executed by ${a.executedBy}`;
-  row.appendChild(info);
-
-  if (a.type === 'verified') {
-    if (a.verifiedBy) {
-      const v = document.createElement('span'); v.className = 'muted';
-      v.textContent = `verified by ${a.verifiedBy}`;
-      row.appendChild(v);
-    } else if (a.executedBy !== myProfile.username) {
-      const verifyBtn = document.createElement('button');
-      verifyBtn.type = 'button'; verifyBtn.className = 'btn btn-small btn-primary'; verifyBtn.textContent = 'Verify';
-      row.appendChild(verifyBtn);
-      verifyBtn.addEventListener('click', () => {
-        if (row.querySelector('.execute-form')) return;
-        const form = document.createElement('div');
-        form.className = 'execute-form'; form.style.marginTop = '8px'; form.style.width = '100%';
-        const measEditor = buildValueListEditor('Verified measurements', a.verifiedMeasurements);
-        const saveBtn = document.createElement('button');
-        saveBtn.className = 'btn btn-small btn-primary'; saveBtn.textContent = 'Save verification'; saveBtn.style.marginTop = '6px';
-        form.append(measEditor, saveBtn);
-        row.appendChild(form);
-        saveBtn.addEventListener('click', async () => {
-          saveBtn.disabled = true;
-          await updateDoc(doc(db, 'test_cases', c.id, 'test_samples', s.id, 'test_actions', a.id), {
-            verifiedBy: myProfile.username,
-            verificationTimestamp: serverTimestamp(),
-            verifiedMeasurements: measEditor.getValues()
-          });
-          await renderCaseDetail(c.id);
-        });
-      });
-    } else {
-      const note = document.createElement('span'); note.className = 'muted';
-      note.textContent = '(awaiting verification by someone else)';
-      row.appendChild(note);
-    }
-  }
-
-  const reopenBtn = document.createElement('button');
-  reopenBtn.type = 'button'; reopenBtn.className = 'btn btn-small'; reopenBtn.textContent = 'Reopen';
-  reopenBtn.addEventListener('click', async () => {
-    await updateDoc(doc(db, 'test_cases', c.id, 'test_samples', s.id, 'test_actions', a.id), {
-      status: false, executedBy: null, executionTimestamp: null,
-      verifiedBy: null, verificationTimestamp: null, verifiedMeasurements: []
-    });
-    await reopenToLabIfNeeded(c.id);
-    await renderCaseDetail(c.id);
-  });
-  row.appendChild(reopenBtn);
-
-  return row;
 }
 
 // ---------------------------------------------------------------------

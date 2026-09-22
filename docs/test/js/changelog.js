@@ -1,4 +1,4 @@
-import { APP_VERSION } from './firebase-init.js?v=0.4.1-t19';
+import { APP_VERSION } from './firebase-init.js?v=0.5.0-t01';
 
 // Plain-language, user-facing history -- distinct from SPEC.md's Decisions
 // Log (design/build rationale) and HANDOFF.md (Claude Code's build notes).
@@ -40,6 +40,17 @@ const CHANGELOG = [
       'Samples: Delete and Duplicate are now small icon buttons instead of text.',
       'Duplicating an unnumbered sample now numbers both the original and the copy (e.g. "Screw" becomes "Screw (1)" and "Screw (2)"), not just the copy.',
       'New Edit icon on each sample: change its name, item, and zones (rename or remove a zone, not just add one) in place.'
+    ]
+  },
+  {
+    version: '0.5.0',
+    date: '2026-09-23',
+    notes: [
+      'Case workflow rebuilt: the fixed New/Lab/Write/Archive/Done stages are gone -- a case now follows whatever steps its case type\'s workflow was set up with, named however admin named them.',
+      'Samples no longer carry their own tests -- a step in the workflow gets tagged with whichever sample(s)/zone(s) it applies to, right when you work on it.',
+      'A step can ask for readings (a fixed field, or one you can add more copies of live), can require a second person to independently verify it, and can always be marked complete by hand.',
+      'Long-press (or right-click) any step in the workflow to jump straight to it, skipping the normal order, with a confirmation first.',
+      'Admin can now build a case type\'s whole workflow from scratch -- add steps, nest steps inside a step, and set what each step asks for.'
     ]
   }
 ];

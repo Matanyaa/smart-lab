@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Smart Lab (Test)</title>
-<link rel="icon" type="image/svg+xml" href="icon.svg?v=0.4.1-t19">
+<link rel="icon" type="image/svg+xml" href="icon.svg?v=0.5.0-t01">
 <meta name="theme-color" content="#141a1f">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -156,7 +156,7 @@
      (var(--radius)) now, so true circles read as a distinct, intentional
      device reserved for one thing -- the case's own lifecycle -- rather
      than decoration repeated everywhere. */
-  .stage-flow{display:flex; align-items:center; margin-bottom:18px; overflow-x:auto; padding:2px 2px 6px;}
+  .stage-flow{position:relative; display:flex; align-items:center; margin-bottom:18px; overflow-x:auto; padding:2px 2px 6px;}
   .stage-flow-node{
     flex-shrink:0; width:58px; height:58px; border-radius:50%; padding:4px;
     display:flex; align-items:center; justify-content:center; text-align:center;
@@ -194,6 +194,21 @@
   .note-item .note-meta{font-size:12px; color:var(--text-dim); margin-bottom:6px;}
   .note-item .note-replies{margin-left:20px; margin-top:10px; border-left:2px solid var(--border-soft); padding-left:12px;}
   .note-category{display:inline-block; padding:2px 7px; border-radius:var(--radius); background:var(--panel); border:1px solid var(--border); font-family:var(--font-mono); font-size:11px; letter-spacing:0.04em; text-transform:uppercase; color:var(--text-dim); margin-left:8px;}
+
+  /* 0.5.0: Workflow/Action/Task primitive -- admin template editor
+     (case-types-ui.js) and case-detail execution view (cases.js). */
+  .workflow-editor-level{margin:6px 0;}
+  .workflow-node-editor{background:var(--panel2); border:1px solid var(--border); border-radius:var(--radius); padding:10px; margin-bottom:8px;}
+  .workflow-node-nested{margin:10px 0 0 18px; padding-left:12px; border-left:2px solid var(--border-soft);}
+  .workflow-task-fields{margin-top:8px;}
+  .workflow-task-fields > label{margin-top:10px;}
+  .workflow-task-fields > label:first-of-type{margin-top:4px;}
+  .workflow-level{margin-top:10px;}
+  .workflow-level:first-child{margin-top:0;}
+  .task-panel h4{margin:0 0 10px; font-size:14px;}
+  .task-execute-form{margin-top:10px;}
+  .task-execute-form .field{margin-bottom:10px;}
+  .task-assignment{margin:10px 0;}
 </style>
 </head>
 <body>
@@ -206,7 +221,7 @@
 
 <header>
   <div class="brand-block" id="headerLogo">
-    <img src="icon.svg?v=0.4.1-t19" alt="">
+    <img src="icon.svg?v=0.5.0-t01" alt="">
     <div class="brand-text">
       <h1>smart-lab</h1>
       <span class="version-sub" id="versionBadge"></span>
@@ -324,9 +339,6 @@
             <label for="newCaseTypeTat">TAT goal (days)</label>
             <input type="number" id="newCaseTypeTat" min="0">
           </div>
-          <label class="checkbox-inline" style="margin-bottom:10px;">
-            <input type="checkbox" id="newCaseTypeSeedDefault"> Seed default workflow
-          </label>
           <button type="submit" class="btn btn-primary">Add case type</button>
         </div>
         <div class="error" id="addCaseTypeError"></div>
@@ -460,13 +472,13 @@
   </div>
 </div>
 
-<script type="module" src="js/auth-ui.js?v=0.4.1-t19"></script>
-<script type="module" src="js/admin-ui.js?v=0.4.1-t19"></script>
-<script type="module" src="js/case-types-ui.js?v=0.4.1-t19"></script>
-<script type="module" src="js/clients-ui.js?v=0.4.1-t19"></script>
-<script type="module" src="js/cases.js?v=0.4.1-t19"></script>
-<script type="module" src="js/client-view.js?v=0.4.1-t19"></script>
-<script type="module" src="js/update-banner.js?v=0.4.1-t19"></script>
-<script type="module" src="js/changelog.js?v=0.4.1-t19"></script>
+<script type="module" src="js/auth-ui.js?v=0.5.0-t01"></script>
+<script type="module" src="js/admin-ui.js?v=0.5.0-t01"></script>
+<script type="module" src="js/case-types-ui.js?v=0.5.0-t01"></script>
+<script type="module" src="js/clients-ui.js?v=0.5.0-t01"></script>
+<script type="module" src="js/cases.js?v=0.5.0-t01"></script>
+<script type="module" src="js/client-view.js?v=0.5.0-t01"></script>
+<script type="module" src="js/update-banner.js?v=0.5.0-t01"></script>
+<script type="module" src="js/changelog.js?v=0.5.0-t01"></script>
 </body>
 </html>
