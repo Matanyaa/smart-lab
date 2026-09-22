@@ -1,12 +1,12 @@
-import { db } from './firebase-init.js?v=0.4.1-t12';
+import { db } from './firebase-init.js?v=0.4.1-t13';
 import {
   collection, doc, getDoc, getDocs, addDoc, updateDoc, deleteDoc, query, where, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { loadCaseTypes, getCachedCaseTypes, findCaseTypeById } from './case-types-ui.js?v=0.4.1-t12';
+import { loadCaseTypes, getCachedCaseTypes, findCaseTypeById } from './case-types-ui.js?v=0.4.1-t13';
 import {
   loadClientOrgsAndClients, getCachedClientOrgs, getCachedClientsForOrg, fetchClientsForOrg,
   findClientById, findClientOrgById
-} from './clients-ui.js?v=0.4.1-t12';
+} from './clients-ui.js?v=0.4.1-t13';
 
 // ---------------------------------------------------------------------
 // Core case/sample/action model (0.4.1 redesign -- see SPEC.md's "Case
@@ -242,22 +242,19 @@ function effectiveStatusText(c) {
   const base = c.onHold ? 'On hold' : c.showResearchToClient ? 'Research' : stageLabel(c.stage);
   return c.highPriority ? `★ ${base}` : base;
 }
-function clientOrgNameOf(c) {
-  if (!c.client) return null;
-  const client = findClientById(c.client);
-  if (!client) return null;
-  const org = findClientOrgById(client.clientOrgId);
-  return org ? org.name : null;
-}
-
-// Header format (0.4.2, at the user's request): title(case/client num,
-// name). day, date, status. client(org-name) -- case manager dropped from
-// the header entirely (still editable via the Info section).
-function caseHeaderText(c) {
+// Header format (0.4.2, revised at the user's direct correction -- the
+// "."s in their original shorthand meant line breaks, not literal
+// separators on one line): three lines -- title; day, date, status;
+// client -- rendered as separate elements, not periods on a single line.
+// Third line has no "Client" label, just org - client (clientDisplayText,
+// already used for the same pairing in the compact Info row). Case
+// manager still dropped from the header entirely (see prior HANDOFF.md
+// entry) -- still editable via the Info section.
+function caseHeaderLines(c) {
   const dc = dayCounterOf(c);
   const dayText = dc == null ? '—' : `day ${dc}`;
   const line2 = [dayText, dueDateOf(c) || '—', effectiveStatusText(c)].join(', ');
-  return `${onameOf(c) || '(unnamed)'}. ${line2}. ${clientOrgNameOf(c) || '—'}`;
+  return [onameOf(c) || '(unnamed)', line2, clientDisplayText(c) || '—'];
 }
 
 // A plain worker executing/verifying the last action on someone else's
@@ -516,7 +513,12 @@ async function renderCaseDetail(caseId) {
   const freshSnap = await getDoc(doc(db, 'cases', caseId));
   const cFresh = { id: caseId, ...freshSnap.data() };
 
-  caseDetailTitle.textContent = caseHeaderText(cFresh);
+  caseDetailTitle.innerHTML = '';
+  caseHeaderLines(cFresh).forEach((line) => {
+    const lineEl = document.createElement('div');
+    lineEl.textContent = line;
+    caseDetailTitle.appendChild(lineEl);
+  });
   editInfoBtn.classList.toggle('hidden', !canUpdateCase(cFresh));
   editInfoBtn.classList.toggle('active', infoEditMode);
   deleteCaseBtn.classList.toggle('hidden', myProfile.role !== 'team_leader');
@@ -556,7 +558,7 @@ function buildInfoSection(c) {
 
   // Compact view deliberately minimal: case number/client case number/
   // name/due date are all already visible in the case header above (see
-  // caseHeaderText()), so repeating them here was pure redundancy. Case
+  // caseHeaderLines()), so repeating them here was pure redundancy. Case
   // manager isn't in the header but also isn't shown compact -- only via
   // full edit. On-hold/research/high-priority no longer show as a separate
   // checklist either -- they're folded into the status text itself now

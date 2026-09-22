@@ -1,4 +1,4 @@
-import { APP_VERSION } from './firebase-init.js?v=0.4.1-t12';
+import { APP_VERSION } from './firebase-init.js?v=0.4.1-t13';
 
 // Plain-language, user-facing history -- distinct from SPEC.md's Decisions
 // Log (design/build rationale) and HANDOFF.md (Claude Code's build notes).
@@ -31,7 +31,7 @@ const CHANGELOG = [
       'Case manager is optional when creating a case, and cases can be deleted at any stage.',
       'Clearer "+ New case" button that shows when it’s open.',
       'Case view: Notes and Edit are now icon buttons at the top, and you can delete a case from there or right from the case list, without opening it first.',
-      'Case header now shows the day count, due date, status, and client together on one line.'
+      'Case header now shows the case title, day/date/status, and client as three clear lines.'
     ]
   }
 ];

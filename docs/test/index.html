@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Smart Lab (Test)</title>
-<link rel="icon" type="image/svg+xml" href="icon.svg?v=0.4.1-t12">
+<link rel="icon" type="image/svg+xml" href="icon.svg?v=0.4.1-t13">
 <meta name="theme-color" content="#141a1f">
 <style>
   :root{
@@ -56,6 +56,7 @@
   .icon-btn:hover{border-color:var(--accent-dim);}
   .icon-btn svg{width:18px; height:18px;}
   .icon-btn.active{background:var(--accent-dim); border-color:var(--accent); color:var(--text);}
+  .icon-btn-accent{color:var(--accent); border-color:var(--accent);}
   .icon-btn-danger{color:var(--err); border-color:var(--err);}
   .icon-btn-danger:hover{background:var(--err); color:#2a0e08;}
   .icon-btn-small{width:28px; height:28px;}
@@ -133,7 +134,8 @@
 
   .case-detail-header{display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;}
   .case-title{font-size:15px; margin:0 0 16px; color:var(--text-dim);}
-  .case-title strong{color:var(--text);}
+  .case-title > div:first-child{color:var(--text); font-weight:600; font-size:16px; margin-bottom:4px;}
+  .case-title > div:not(:first-child){margin-top:2px;}
 
   .case-section{margin-top:24px; padding-top:16px; border-top:1px solid var(--border-soft);}
   .case-section:first-child{margin-top:0; padding-top:0; border-top:none;}
@@ -171,7 +173,7 @@
 
 <header>
   <div class="brand-block" id="headerLogo">
-    <img src="icon.svg?v=0.4.1-t12" alt="">
+    <img src="icon.svg?v=0.4.1-t13" alt="">
     <div class="brand-text">
       <h1>smart-lab</h1>
       <span class="version-sub" id="versionBadge"></span>
@@ -376,14 +378,14 @@
     <div class="case-detail-header">
       <button type="button" class="btn btn-small" id="backToCasesBtn">&larr; Back to cases</button>
       <div class="header-actions">
-        <button type="button" class="icon-btn" id="toggleNotesBtn" title="Notes" aria-label="Notes">
+        <button type="button" class="icon-btn icon-btn-accent" id="toggleNotesBtn" title="Notes" aria-label="Notes">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M14 3v4a1 1 0 0 0 1 1h4"></path>
             <path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2z"></path>
             <path d="M9 9H8M16 13H8M16 17H8"></path>
           </svg>
         </button>
-        <button type="button" class="icon-btn hidden" id="editInfoBtn" title="Edit info" aria-label="Edit info">
+        <button type="button" class="icon-btn icon-btn-accent hidden" id="editInfoBtn" title="Edit info" aria-label="Edit info">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path>
           </svg>
@@ -398,7 +400,7 @@
         </button>
       </div>
     </div>
-    <p class="case-title" id="caseDetailTitle"></p>
+    <div class="case-title" id="caseDetailTitle"></div>
     <div id="caseMainView"></div>
     <div id="caseNotesView" class="hidden"></div>
   </div>
@@ -425,13 +427,13 @@
   </div>
 </div>
 
-<script type="module" src="js/auth-ui.js?v=0.4.1-t12"></script>
-<script type="module" src="js/admin-ui.js?v=0.4.1-t12"></script>
-<script type="module" src="js/case-types-ui.js?v=0.4.1-t12"></script>
-<script type="module" src="js/clients-ui.js?v=0.4.1-t12"></script>
-<script type="module" src="js/cases.js?v=0.4.1-t12"></script>
-<script type="module" src="js/client-view.js?v=0.4.1-t12"></script>
-<script type="module" src="js/update-banner.js?v=0.4.1-t12"></script>
-<script type="module" src="js/changelog.js?v=0.4.1-t12"></script>
+<script type="module" src="js/auth-ui.js?v=0.4.1-t13"></script>
+<script type="module" src="js/admin-ui.js?v=0.4.1-t13"></script>
+<script type="module" src="js/case-types-ui.js?v=0.4.1-t13"></script>
+<script type="module" src="js/clients-ui.js?v=0.4.1-t13"></script>
+<script type="module" src="js/cases.js?v=0.4.1-t13"></script>
+<script type="module" src="js/client-view.js?v=0.4.1-t13"></script>
+<script type="module" src="js/update-banner.js?v=0.4.1-t13"></script>
+<script type="module" src="js/changelog.js?v=0.4.1-t13"></script>
 </body>
 </html>
