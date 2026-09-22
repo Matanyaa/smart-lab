@@ -1,12 +1,12 @@
-import { db } from './firebase-init.js?v=0.4.1-t16';
+import { db } from './firebase-init.js?v=0.4.1-t17';
 import {
   collection, doc, getDoc, getDocs, addDoc, updateDoc, deleteDoc, query, where, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { loadCaseTypes, getCachedCaseTypes, findCaseTypeById } from './case-types-ui.js?v=0.4.1-t16';
+import { loadCaseTypes, getCachedCaseTypes, findCaseTypeById } from './case-types-ui.js?v=0.4.1-t17';
 import {
   loadClientOrgsAndClients, getCachedClientOrgs, getCachedClientsForOrg, fetchClientsForOrg,
   findClientById, findClientOrgById
-} from './clients-ui.js?v=0.4.1-t16';
+} from './clients-ui.js?v=0.4.1-t17';
 
 // ---------------------------------------------------------------------
 // Core case/sample/action model (0.4.1 redesign -- see SPEC.md's "Case
@@ -35,6 +35,7 @@ const newCaseTypeSelect = document.getElementById('newCaseType');
 const newCaseManagerSelect = document.getElementById('newCaseManager');
 
 const TRASH_ICON_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6M14 11v6"></path><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path></svg>`;
+const DUPLICATE_ICON_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`;
 
 let myProfile = null; // { uid, username, role }
 let cases = [];
@@ -1018,11 +1019,13 @@ function buildNameListEditor(addButtonLabel, placeholder) {
 }
 
 // Batch add view (0.4.1 redesign, at the user's request): a toggled panel
-// instead of an always-open inline form. Set an item name and a number of
-// copies; optionally list out specific sample names -- if none are
-// listed, the item itself is treated as a single sample (per copy).
-// Zones are entered via repeatable named rows instead of a comma-
-// separated string.
+// instead of an always-open inline form. Set an item name and optionally
+// list out specific sample names -- if none are listed, the item itself is
+// treated as a single sample. Zones are entered via repeatable named rows
+// instead of a comma-separated string. No "number of copies" field
+// (dropped at the user's request, 2026-09-22) -- making several similar
+// samples is now done by duplicating an existing one instead (see
+// buildSampleStructureCard's duplicate icon).
 function buildSamplesSection(c, samples) {
   const section = document.createElement('div');
   section.className = 'case-section';
@@ -1044,12 +1047,7 @@ function buildSamplesSection(c, samples) {
   const itemLabel = document.createElement('label'); itemLabel.textContent = 'Item name';
   const itemInput = document.createElement('input');
   itemField.append(itemLabel, itemInput);
-  const copiesField = document.createElement('div'); copiesField.className = 'field';
-  const copiesLabel = document.createElement('label'); copiesLabel.textContent = 'Number of copies';
-  const copiesInput = document.createElement('input');
-  copiesInput.type = 'number'; copiesInput.min = '1'; copiesInput.value = '1';
-  copiesField.append(copiesLabel, copiesInput);
-  topRow.append(itemField, copiesField);
+  topRow.append(itemField);
   addView.appendChild(topRow);
 
   const samplesLabel = document.createElement('label');
@@ -1082,7 +1080,6 @@ function buildSamplesSection(c, samples) {
   createBtn.addEventListener('click', async () => {
     err.textContent = '';
     const itemName = itemInput.value.trim() || null;
-    const copies = Math.max(1, parseInt(copiesInput.value, 10) || 1);
     const zones = zoneListEditor.getValues();
     const sampleNames = sampleListEditor.getValues();
 
@@ -1100,12 +1097,9 @@ function buildSamplesSection(c, samples) {
         : [{ item: null, name: itemName }];
 
       for (const entry of entries) {
-        for (let n = 1; n <= copies; n++) {
-          const finalName = copies > 1 ? `${entry.name} (${n})` : entry.name;
-          const sampleRef = await addDoc(collection(db, 'test_cases', c.id, 'test_samples'), { item: entry.item, name: finalName, zones });
-          for (const action of defaultSampleActions(c.labWorkflowTemplate)) {
-            await addDoc(collection(db, 'test_cases', c.id, 'test_samples', sampleRef.id, 'test_actions'), action);
-          }
+        const sampleRef = await addDoc(collection(db, 'test_cases', c.id, 'test_samples'), { item: entry.item, name: entry.name, zones });
+        for (const action of defaultSampleActions(c.labWorkflowTemplate)) {
+          await addDoc(collection(db, 'test_cases', c.id, 'test_samples', sampleRef.id, 'test_actions'), action);
         }
       }
       await reopenToLabIfNeeded(c.id);
@@ -1181,27 +1175,58 @@ function buildSampleStructureCard(c, s) {
     });
   });
 
-  // Delete sample -- team_leader only, matching setup/firestore.rules'
-  // samples delete rule (unchanged from Iteration 4). Cascade-deletes the
-  // sample's own actions first, same reasoning as case deletion: Firestore
-  // doesn't cascade subcollections on its own.
+  // Duplicate + Delete -- common per-sample actions, shown as small icon
+  // buttons rather than text (at the user's request, 2026-09-22: "for
+  // common actions use icons"), matching the icon-btn pattern already used
+  // for the case-detail header and overview row (TRASH_ICON_SVG etc.).
+  // Duplicate is open to any case staff (same write permission as adding a
+  // sample) -- copies item/name/zones and seeds fresh default actions,
+  // exactly like creating a new sample, just pre-filled. Delete stays
+  // team_leader-only, matching setup/firestore.rules' samples delete rule
+  // (unchanged from Iteration 4); it cascade-deletes the sample's own
+  // actions first, same reasoning as case deletion: Firestore doesn't
+  // cascade subcollections on its own.
+  const actionsRow = document.createElement('div');
+  actionsRow.className = 'sample-actions-row';
+
+  const duplicateBtn = document.createElement('button');
+  duplicateBtn.type = 'button'; duplicateBtn.className = 'icon-btn icon-btn-small icon-btn-accent';
+  duplicateBtn.title = 'Duplicate sample'; duplicateBtn.setAttribute('aria-label', 'Duplicate sample');
+  duplicateBtn.innerHTML = DUPLICATE_ICON_SVG;
+  duplicateBtn.addEventListener('click', async () => {
+    duplicateBtn.disabled = true;
+    try {
+      const newName = s.name ? `${s.name} (copy)` : 'Copy';
+      const sampleRef = await addDoc(collection(db, 'test_cases', c.id, 'test_samples'), { item: s.item, name: newName, zones: s.zones || [] });
+      for (const action of defaultSampleActions(c.labWorkflowTemplate)) {
+        await addDoc(collection(db, 'test_cases', c.id, 'test_samples', sampleRef.id, 'test_actions'), action);
+      }
+      await reopenToLabIfNeeded(c.id);
+      await renderCaseDetail(c.id);
+    } catch (ex) {
+      duplicateBtn.disabled = false;
+    }
+  });
+  actionsRow.appendChild(duplicateBtn);
+
   if (myProfile.role === 'team_leader') {
-    const deleteWrap = document.createElement('div');
-    deleteWrap.style.marginTop = '12px';
     const deleteBtn = document.createElement('button');
-    deleteBtn.type = 'button'; deleteBtn.className = 'btn btn-small'; deleteBtn.textContent = 'Delete sample';
-    deleteWrap.appendChild(deleteBtn);
+    deleteBtn.type = 'button'; deleteBtn.className = 'icon-btn icon-btn-small icon-btn-danger';
+    deleteBtn.title = 'Delete sample'; deleteBtn.setAttribute('aria-label', 'Delete sample');
+    deleteBtn.innerHTML = TRASH_ICON_SVG;
+    actionsRow.appendChild(deleteBtn);
 
     deleteBtn.addEventListener('click', () => {
-      if (deleteWrap.querySelector('.confirm-row')) return;
-      const confirmRow = document.createElement('span');
+      if (actionsRow.querySelector('.confirm-row')) return;
+      const confirmRow = document.createElement('div');
       confirmRow.className = 'confirm-row';
-      confirmRow.style.marginLeft = '8px';
-      const msg = document.createElement('span'); msg.className = 'error'; msg.textContent = 'Delete this sample and its actions? ';
+      confirmRow.style.cssText = 'position:absolute; left:0; top:34px; background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:10px; width:240px; z-index:5;';
+      const msg = document.createElement('p'); msg.className = 'error'; msg.style.margin = '0 0 8px';
+      msg.textContent = 'Delete this sample and its actions?';
       const confirmBtn = document.createElement('button');
       confirmBtn.type = 'button'; confirmBtn.className = 'btn btn-small btn-primary'; confirmBtn.textContent = 'Confirm';
       const cancelBtn = document.createElement('button');
-      cancelBtn.type = 'button'; cancelBtn.className = 'btn btn-small'; cancelBtn.textContent = 'Cancel'; cancelBtn.style.marginLeft = '6px';
+      cancelBtn.type = 'button'; cancelBtn.className = 'btn btn-small'; cancelBtn.textContent = 'Cancel'; cancelBtn.style.marginLeft = '8px';
       cancelBtn.addEventListener('click', () => confirmRow.remove());
       confirmBtn.addEventListener('click', async () => {
         confirmBtn.disabled = true;
@@ -1214,11 +1239,11 @@ function buildSampleStructureCard(c, s) {
         await renderCaseDetail(c.id);
       });
       confirmRow.append(msg, confirmBtn, cancelBtn);
-      deleteWrap.appendChild(confirmRow);
+      actionsRow.appendChild(confirmRow);
     });
-
-    card.appendChild(deleteWrap);
   }
+
+  card.appendChild(actionsRow);
 
   return card;
 }

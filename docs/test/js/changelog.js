@@ -1,4 +1,4 @@
-import { APP_VERSION } from './firebase-init.js?v=0.4.1-t16';
+import { APP_VERSION } from './firebase-init.js?v=0.4.1-t17';
 
 // Plain-language, user-facing history -- distinct from SPEC.md's Decisions
 // Log (design/build rationale) and HANDOFF.md (Claude Code's build notes).
@@ -35,7 +35,9 @@ const CHANGELOG = [
       'Visual refresh: new typography (a technical sans/mono pairing) and sharper corners app-wide, plus status now shows as a small stamped tag instead of plain text.',
       'Case view: the workflow stage is now a row of named, clickable circles (New/Lab/Write/Archive/Done). Click any of them to preview that stage; the real controls still only appear on the case’s actual current stage.',
       'Removed the redundant "Client" line from the compact case-info view (the header already shows it).',
-      'Samples no longer show test status/results inline -- that’s all in the Workflow section’s Lab view now, where you can also execute or verify actions.'
+      'Samples no longer show test status/results inline -- that’s all in the Workflow section’s Lab view now, where you can also execute or verify actions.',
+      'Adding a sample no longer asks for a number of copies -- instead, each sample now has a Duplicate icon to quickly make a copy of it.',
+      'Samples: Delete and Duplicate are now small icon buttons instead of text.'
     ]
   }
 ];
