@@ -1,12 +1,12 @@
-import { db } from './firebase-init.js?v=0.4.1-t14';
+import { db } from './firebase-init.js?v=0.4.1-t15';
 import {
   collection, doc, getDoc, getDocs, addDoc, updateDoc, deleteDoc, query, where, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { loadCaseTypes, getCachedCaseTypes, findCaseTypeById } from './case-types-ui.js?v=0.4.1-t14';
+import { loadCaseTypes, getCachedCaseTypes, findCaseTypeById } from './case-types-ui.js?v=0.4.1-t15';
 import {
   loadClientOrgsAndClients, getCachedClientOrgs, getCachedClientsForOrg, fetchClientsForOrg,
   findClientById, findClientOrgById
-} from './clients-ui.js?v=0.4.1-t14';
+} from './clients-ui.js?v=0.4.1-t15';
 
 // ---------------------------------------------------------------------
 // Core case/sample/action model (0.4.1 redesign -- see SPEC.md's "Case
@@ -41,6 +41,7 @@ let cases = [];
 let infoEditMode = false;
 let expandedSamples = new Set();
 let notesShown = false;
+let viewedStage = null; // null = follow the case's real current stage
 
 export function hideCasesScreen() {
   casesScreen.classList.add('hidden');
@@ -202,6 +203,7 @@ newCaseForm.addEventListener('submit', async (e) => {
 });
 
 const STAGE_LABELS = { new: 'New', lab: 'Lab', write: 'Write', archive: 'Archive', done: 'Done' };
+const STAGE_ORDER = ['new', 'lab', 'write', 'archive', 'done'];
 function stageLabel(stage) { return STAGE_LABELS[stage] || stage; }
 
 const WRITING_LABELS = {
@@ -464,6 +466,7 @@ async function openCaseDetail(caseId) {
   infoEditMode = false;
   expandedSamples = new Set();
   notesShown = false;
+  viewedStage = null;
   toggleNotesBtn.classList.remove('active');
   toggleNotesBtn.title = 'Notes';
   toggleNotesBtn.setAttribute('aria-label', 'Notes');
@@ -523,7 +526,8 @@ async function renderCaseDetail(caseId) {
   editInfoBtn.classList.toggle('active', infoEditMode);
   deleteCaseBtn.classList.toggle('hidden', myProfile.role !== 'team_leader');
   caseMainView.innerHTML = '';
-  caseMainView.appendChild(buildInfoSection(cFresh));
+  const infoSection = buildInfoSection(cFresh);
+  if (infoSection) caseMainView.appendChild(infoSection);
   caseMainView.appendChild(buildWorkflowSection(cFresh, samples));
   caseMainView.appendChild(buildSamplesSection(cFresh, samples));
 }
@@ -533,15 +537,6 @@ async function renderCaseDetail(caseId) {
 // header's edit icon (editInfoBtn). Scope is the case's own info fields
 // only, never samples or workflow (see SPEC.md's "Case info display").
 // ---------------------------------------------------------------------
-function infoRow(label, valueText) {
-  const row = document.createElement('div');
-  row.className = 'case-field';
-  const l = document.createElement('label'); l.textContent = label;
-  const v = document.createElement('div'); v.textContent = valueText || '—';
-  row.append(l, v);
-  return row;
-}
-
 function clientDisplayText(c) {
   if (!c.client) return null;
   const client = findClientById(c.client);
@@ -551,24 +546,22 @@ function clientDisplayText(c) {
 }
 
 function buildInfoSection(c) {
-  const section = document.createElement('div');
-  section.className = 'case-section';
-
   const canEdit = myProfile.role === 'team_leader' || c.caseManager === myProfile.username;
 
-  // Compact view deliberately minimal: case number/client case number/
-  // name/due date are all already visible in the case header above (see
-  // caseHeaderLines()), so repeating them here was pure redundancy. Case
-  // manager isn't in the header but also isn't shown compact -- only via
-  // full edit. On-hold/research/high-priority no longer show as a separate
-  // checklist either -- they're folded into the status text itself now
-  // (see effectiveStatusText()). Full editing (all fields, all toggles) is
-  // still available via the header's edit icon -- only the read-only
-  // summary shrank, not what's actually editable.
-  if (!infoEditMode || !canEdit) {
-    section.appendChild(infoRow('Client', clientDisplayText(c)));
-    return section;
-  }
+  // Compact view is now nothing at all: case number/client case number/
+  // name/due date/client were all already visible in the case header above
+  // (see caseHeaderLines(), whose 3rd line covers client -- the standalone
+  // "Client" row here was dropped as pure redundancy, at the user's
+  // request). Case manager isn't in the header but also isn't shown
+  // compact -- only via full edit. On-hold/research/high-priority no
+  // longer show as a separate checklist either -- they're folded into the
+  // status text itself now (see effectiveStatusText()). Full editing (all
+  // fields, all toggles) is still available via the header's edit icon --
+  // the compact view just has nothing left to summarize on its own.
+  if (!infoEditMode || !canEdit) return null;
+
+  const section = document.createElement('div');
+  section.className = 'case-section';
 
   // Full/editable view.
   const grid = document.createElement('div');
@@ -741,47 +734,101 @@ async function reopenToLabIfNeeded(caseId) {
   }
 }
 
+// Stage flow: a row of named, clickable circles (New/Lab/Write/Archive/
+// Done), at the user's request replacing the plain "Workflow — {stage}"
+// text heading. Clicking a circle sets `viewedStage` and re-renders --
+// this only changes which stage's panel is *displayed* below, never the
+// case's real `stage` field. The real current stage still drives which
+// panel shows its live, interactive controls (see buildWorkflowSection);
+// any other circle shows a read-only preview instead, so browsing past/
+// future stages can't accidentally trigger a real transition out of turn.
+function buildStageFlow(c, effectiveViewed) {
+  const wrap = document.createElement('div');
+  wrap.className = 'stage-flow';
+  const currentIdx = STAGE_ORDER.indexOf(c.stage);
+  STAGE_ORDER.forEach((stage, idx) => {
+    if (idx > 0) {
+      const line = document.createElement('div');
+      line.className = 'stage-flow-line';
+      if (idx <= currentIdx) line.classList.add('done');
+      wrap.appendChild(line);
+    }
+    const node = document.createElement('button');
+    node.type = 'button';
+    node.className = 'stage-flow-node';
+    if (idx < currentIdx) node.classList.add('done');
+    if (stage === c.stage) node.classList.add('current');
+    if (stage === effectiveViewed) node.classList.add('viewed');
+    node.textContent = stageLabel(stage);
+    node.title = stageLabel(stage) + (stage === c.stage ? ' (current stage)' : '');
+    if (stage === c.stage) node.setAttribute('aria-current', 'step');
+    node.addEventListener('click', () => { viewedStage = stage; renderCaseDetail(c.id); });
+    wrap.appendChild(node);
+  });
+  return wrap;
+}
+
+function readonlyNote(text) {
+  const p = document.createElement('p'); p.className = 'muted';
+  p.textContent = text;
+  return p;
+}
+
 function buildWorkflowSection(c, samples) {
   const section = document.createElement('div');
   section.className = 'case-section';
   const h3 = document.createElement('h3');
-  h3.textContent = `Workflow — ${stageLabel(c.stage)}`;
+  h3.textContent = 'Workflow';
   section.appendChild(h3);
 
-  const editAllowed = canUpdateCase(c);
+  const effectiveViewed = viewedStage || c.stage;
+  section.appendChild(buildStageFlow(c, effectiveViewed));
 
-  if (c.stage === 'new') {
-    if (samples.length === 0) {
-      const note = document.createElement('p'); note.className = 'muted';
-      note.textContent = 'Add at least one sample before starting lab.';
-      section.appendChild(note);
+  const editAllowed = canUpdateCase(c);
+  const isCurrentStage = effectiveViewed === c.stage;
+
+  if (effectiveViewed === 'new') {
+    if (!isCurrentStage) {
+      section.appendChild(readonlyNote(c.startDate ? `Case opened ${c.startDate}.` : 'Case opened here.'));
+    } else {
+      if (samples.length === 0) {
+        section.appendChild(readonlyNote('Add at least one sample before starting lab.'));
+      }
+      // Exits `new` via an explicit team-leader confirmation only -- not
+      // gated on field-completeness (SPEC.md's "Case lifecycle").
+      if (myProfile.role === 'team_leader') {
+        const btn = document.createElement('button');
+        btn.className = 'btn btn-primary'; btn.textContent = 'Start lab';
+        btn.disabled = samples.length === 0;
+        btn.addEventListener('click', async () => {
+          await updateDoc(doc(db, 'cases', c.id), { stage: 'lab' });
+          await renderCaseDetail(c.id);
+        });
+        section.appendChild(btn);
+      }
     }
-    // Exits `new` via an explicit team-leader confirmation only -- not
-    // gated on field-completeness (SPEC.md's "Case lifecycle").
-    if (myProfile.role === 'team_leader') {
-      const btn = document.createElement('button');
-      btn.className = 'btn btn-primary'; btn.textContent = 'Start lab';
-      btn.disabled = samples.length === 0;
-      btn.addEventListener('click', async () => {
-        await updateDoc(doc(db, 'cases', c.id), { stage: 'lab' });
-        await renderCaseDetail(c.id);
-      });
-      section.appendChild(btn);
-    }
-  } else if (c.stage === 'lab') {
+  } else if (effectiveViewed === 'lab') {
+    // Already read-only (no buttons) regardless of stage, so it's safe to
+    // show this exact panel whether or not `lab` is the real current stage.
     const totalActions = samples.reduce((sum, s) => sum + s.actions.length, 0);
     const doneActions = samples.reduce((sum, s) => sum + s.actions.filter(isActionComplete).length, 0);
     const completeSamples = samples.filter((s) => s.actions.length > 0 && s.actions.every(isActionComplete)).length;
-    const p = document.createElement('p'); p.className = 'muted';
-    p.textContent = `${completeSamples}/${samples.length} samples complete (${doneActions}/${totalActions} actions done). Moves to Write automatically once every sample's actions are done (verified-type actions need sign-off too).`;
-    section.appendChild(p);
-  } else if (c.stage === 'write') {
-    section.appendChild(buildWritingWorkflow(c, editAllowed));
-  } else if (c.stage === 'archive') {
-    section.appendChild(buildArchivingWorkflow(c, editAllowed));
-  } else if (c.stage === 'done') {
-    const p = document.createElement('p'); p.className = 'muted'; p.textContent = 'This case is done.';
-    section.appendChild(p);
+    section.appendChild(readonlyNote(`${completeSamples}/${samples.length} samples complete (${doneActions}/${totalActions} actions done). Moves to Write automatically once every sample's actions are done (verified-type actions need sign-off too).`));
+  } else if (effectiveViewed === 'write') {
+    if (c.writingStage == null) {
+      section.appendChild(readonlyNote('Not reached yet.'));
+    } else if (isCurrentStage) {
+      section.appendChild(buildWritingWorkflow(c, editAllowed));
+    } else {
+      section.appendChild(readonlyNote(`Writing stage: ${WRITING_LABELS[c.writingStage] || c.writingStage}`));
+    }
+  } else if (effectiveViewed === 'archive') {
+    // buildArchivingWorkflow(c, false) already suppresses every button
+    // (remove/mark-done/add-step) -- reused as-is for the read-only
+    // preview, real interactive controls only when archive is current.
+    section.appendChild(buildArchivingWorkflow(c, isCurrentStage && editAllowed));
+  } else if (effectiveViewed === 'done') {
+    section.appendChild(readonlyNote(isCurrentStage ? 'This case is done.' : 'Not reached yet.'));
   }
 
   return section;
