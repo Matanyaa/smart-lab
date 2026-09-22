@@ -1,12 +1,12 @@
-import { db } from './firebase-init.js?v=0.4.1-t17';
+import { db } from './firebase-init.js?v=0.4.1-t18';
 import {
   collection, doc, getDoc, getDocs, addDoc, updateDoc, deleteDoc, query, where, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { loadCaseTypes, getCachedCaseTypes, findCaseTypeById } from './case-types-ui.js?v=0.4.1-t17';
+import { loadCaseTypes, getCachedCaseTypes, findCaseTypeById } from './case-types-ui.js?v=0.4.1-t18';
 import {
   loadClientOrgsAndClients, getCachedClientOrgs, getCachedClientsForOrg, fetchClientsForOrg,
   findClientById, findClientOrgById
-} from './clients-ui.js?v=0.4.1-t17';
+} from './clients-ui.js?v=0.4.1-t18';
 
 // ---------------------------------------------------------------------
 // Core case/sample/action model (0.4.1 redesign -- see SPEC.md's "Case
@@ -1120,6 +1120,31 @@ function buildSamplesSection(c, samples) {
 // workflow section's lab panel now (see buildSampleActionsCard below).
 // Both functions share `expandedSamples` as their expand/collapse state,
 // so expanding a sample in one section expands its counterpart too.
+
+// Duplicate naming (2026-09-22, at the user's request): strips a trailing
+// " (N)" off the sample being duplicated to find its base name, looks at
+// every other sample with the same `item` whose name shares that base, and
+// names the copy one past the highest number in use -- e.g. duplicating
+// "Head (1)" when "Head (2)" already exists produces "Head (3)", not
+// "Head (2) (copy)". A sample with no numeric suffix counts as instance 1.
+// Queried fresh at click time (not off the possibly-stale render-time
+// `samples` list) so concurrent additions by someone else aren't missed.
+async function nextDuplicateName(caseId, item, name) {
+  const baseMatch = name.match(/^(.*) \((\d+)\)$/);
+  const baseName = baseMatch ? baseMatch[1] : name;
+  const siblingsSnap = await getDocs(query(collection(db, 'test_cases', caseId, 'test_samples'), where('item', '==', item)));
+  let maxNum = 1;
+  siblingsSnap.docs.forEach((d) => {
+    const siblingName = d.data().name || '';
+    const m = siblingName.match(/^(.*) \((\d+)\)$/);
+    const siblingBase = m ? m[1] : siblingName;
+    if (siblingBase !== baseName) return;
+    const n = m ? parseInt(m[2], 10) : 1;
+    if (n > maxNum) maxNum = n;
+  });
+  return `${baseName} (${maxNum + 1})`;
+}
+
 function buildSampleStructureCard(c, s) {
   const card = document.createElement('div');
   card.className = 'sample-card';
@@ -1196,7 +1221,7 @@ function buildSampleStructureCard(c, s) {
   duplicateBtn.addEventListener('click', async () => {
     duplicateBtn.disabled = true;
     try {
-      const newName = s.name ? `${s.name} (copy)` : 'Copy';
+      const newName = await nextDuplicateName(c.id, s.item, s.name);
       const sampleRef = await addDoc(collection(db, 'test_cases', c.id, 'test_samples'), { item: s.item, name: newName, zones: s.zones || [] });
       for (const action of defaultSampleActions(c.labWorkflowTemplate)) {
         await addDoc(collection(db, 'test_cases', c.id, 'test_samples', sampleRef.id, 'test_actions'), action);
