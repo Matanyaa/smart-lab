@@ -1,12 +1,12 @@
-import { db } from './firebase-init.js?v=0.4.1-t11';
+import { db } from './firebase-init.js?v=0.4.1-t12';
 import {
   collection, doc, getDoc, getDocs, addDoc, updateDoc, deleteDoc, query, where, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { loadCaseTypes, getCachedCaseTypes, findCaseTypeById } from './case-types-ui.js?v=0.4.1-t11';
+import { loadCaseTypes, getCachedCaseTypes, findCaseTypeById } from './case-types-ui.js?v=0.4.1-t12';
 import {
   loadClientOrgsAndClients, getCachedClientOrgs, getCachedClientsForOrg, fetchClientsForOrg,
   findClientById, findClientOrgById
-} from './clients-ui.js?v=0.4.1-t11';
+} from './clients-ui.js?v=0.4.1-t12';
 
 // ---------------------------------------------------------------------
 // Core case/sample/action model (0.4.1 redesign -- see SPEC.md's "Case
@@ -23,6 +23,8 @@ const newCaseForm = document.getElementById('newCaseForm');
 const newCaseError = document.getElementById('newCaseError');
 const backToCasesBtn = document.getElementById('backToCasesBtn');
 const toggleNotesBtn = document.getElementById('toggleNotesBtn');
+const editInfoBtn = document.getElementById('editInfoBtn');
+const deleteCaseBtn = document.getElementById('deleteCaseBtn');
 const caseDetailTitle = document.getElementById('caseDetailTitle');
 const caseMainView = document.getElementById('caseMainView');
 const caseNotesView = document.getElementById('caseNotesView');
@@ -31,6 +33,8 @@ const newCaseClientOrgSelect = document.getElementById('newCaseClientOrg');
 const newCaseClientSelect = document.getElementById('newCaseClient');
 const newCaseTypeSelect = document.getElementById('newCaseType');
 const newCaseManagerSelect = document.getElementById('newCaseManager');
+
+const TRASH_ICON_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6M14 11v6"></path><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path></svg>`;
 
 let myProfile = null; // { uid, username, role }
 let cases = [];
@@ -238,16 +242,22 @@ function effectiveStatusText(c) {
   const base = c.onHold ? 'On hold' : c.showResearchToClient ? 'Research' : stageLabel(c.stage);
   return c.highPriority ? `★ ${base}` : base;
 }
-function caseTitle(c) {
+function clientOrgNameOf(c) {
+  if (!c.client) return null;
+  const client = findClientById(c.client);
+  if (!client) return null;
+  const org = findClientOrgById(client.clientOrgId);
+  return org ? org.name : null;
+}
+
+// Header format (0.4.2, at the user's request): title(case/client num,
+// name). day, date, status. client(org-name) -- case manager dropped from
+// the header entirely (still editable via the Info section).
+function caseHeaderText(c) {
   const dc = dayCounterOf(c);
-  const parts = [
-    onameOf(c) || '(unnamed)',
-    c.caseManager || 'Unassigned',
-    dc == null ? '—' : `day ${dc}`,
-    dueDateOf(c) || '—',
-    effectiveStatusText(c)
-  ];
-  return parts.join(' | ');
+  const dayText = dc == null ? '—' : `day ${dc}`;
+  const line2 = [dayText, dueDateOf(c) || '—', effectiveStatusText(c)].join(', ');
+  return `${onameOf(c) || '(unnamed)'}. ${line2}. ${clientOrgNameOf(c) || '—'}`;
 }
 
 // A plain worker executing/verifying the last action on someone else's
@@ -318,10 +328,15 @@ function buildTypeCard(group) {
 
 // Two-line row: top is the numbered oname (case# - client case# - name),
 // bottom splits worker/day-count/due-date (left) from stage (right) --
-// replaces the old single pipe-delimited line.
+// replaces the old single pipe-delimited line. Team leaders also get a
+// delete icon on the row itself (0.4.2), matching the delete control in
+// case view -- same cascade delete, same team_leader-only gating.
 function renderCaseRow(c, number) {
   const row = document.createElement('div');
   row.className = 'case-row-item';
+
+  const content = document.createElement('div');
+  content.className = 'case-row-content';
 
   const top = document.createElement('div');
   top.className = 'case-row-top';
@@ -343,9 +358,53 @@ function renderCaseRow(c, number) {
   status.textContent = effectiveStatusText(c);
 
   bottom.append(meta, status);
-  row.append(top, bottom);
+  content.append(top, bottom);
+  row.appendChild(content);
   row.addEventListener('click', () => openCaseDetail(c.id));
+
+  if (myProfile.role === 'team_leader') {
+    row.appendChild(buildCaseRowDeleteControl(c));
+  }
+
   return row;
+}
+
+function buildCaseRowDeleteControl(c) {
+  const wrap = document.createElement('div');
+  wrap.className = 'case-row-delete';
+  // Swallow all clicks inside (icon, confirm, cancel) so they never bubble
+  // to the row's own click handler and open the case instead.
+  wrap.addEventListener('click', (e) => e.stopPropagation());
+
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'icon-btn icon-btn-danger icon-btn-small';
+  btn.title = 'Delete case'; btn.setAttribute('aria-label', 'Delete case');
+  btn.innerHTML = TRASH_ICON_SVG;
+  wrap.appendChild(btn);
+
+  btn.addEventListener('click', () => {
+    if (wrap.querySelector('.confirm-row')) return;
+    const confirmRow = document.createElement('div');
+    confirmRow.className = 'confirm-row';
+    confirmRow.style.cssText = 'position:absolute; right:0; top:34px; background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:10px; width:220px; z-index:5;';
+    const msg = document.createElement('p'); msg.className = 'error'; msg.style.margin = '0 0 8px';
+    msg.textContent = 'Permanently delete this case?';
+    const confirmBtn = document.createElement('button');
+    confirmBtn.className = 'btn btn-small btn-primary'; confirmBtn.textContent = 'Confirm delete';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'btn btn-small'; cancelBtn.textContent = 'Cancel'; cancelBtn.style.marginLeft = '8px';
+    cancelBtn.addEventListener('click', () => confirmRow.remove());
+    confirmBtn.addEventListener('click', async () => {
+      confirmBtn.disabled = true;
+      await deleteCaseCascade(c.id);
+      await loadCaseList();
+    });
+    confirmRow.append(msg, confirmBtn, cancelBtn);
+    wrap.appendChild(confirmRow);
+  });
+
+  return wrap;
 }
 
 backToCasesBtn.addEventListener('click', () => {
@@ -357,10 +416,48 @@ backToCasesBtn.addEventListener('click', () => {
 toggleNotesBtn.addEventListener('click', async () => {
   notesShown = !notesShown;
   toggleNotesBtn.classList.toggle('active', notesShown);
-  toggleNotesBtn.textContent = notesShown ? 'Back to case' : 'Notes';
+  toggleNotesBtn.title = notesShown ? 'Back to case' : 'Notes';
+  toggleNotesBtn.setAttribute('aria-label', toggleNotesBtn.title);
   caseMainView.classList.toggle('hidden', notesShown);
   caseNotesView.classList.toggle('hidden', !notesShown);
   if (notesShown) await renderNotesView(currentCaseId);
+});
+
+// Edit info now lives in the case-detail header (0.4.2) rather than inline
+// above the Info section -- see buildInfoSection.
+editInfoBtn.addEventListener('click', () => {
+  infoEditMode = !infoEditMode;
+  editInfoBtn.classList.toggle('active', infoEditMode);
+  renderCaseDetail(currentCaseId);
+});
+
+// Case deletion, moved from a text button at the bottom of the workflow
+// section into the header (0.4.2), next to the edit icon. Same cascade
+// delete as before, same team_leader-only gating (enforced both by
+// deleteCaseBtn's visibility below and by setup/firestore.rules).
+deleteCaseBtn.addEventListener('click', () => {
+  const existing = document.getElementById('caseDeleteConfirm');
+  if (existing) { existing.remove(); return; }
+  const bar = document.createElement('div');
+  bar.id = 'caseDeleteConfirm';
+  bar.className = 'confirm-row';
+  bar.style.margin = '0 0 16px';
+  const msg = document.createElement('p'); msg.className = 'error';
+  msg.textContent = 'This permanently deletes the case and everything in it. This cannot be undone.';
+  const confirmBtn = document.createElement('button');
+  confirmBtn.className = 'btn btn-small btn-primary'; confirmBtn.textContent = 'Confirm delete';
+  const cancelBtn = document.createElement('button');
+  cancelBtn.className = 'btn btn-small'; cancelBtn.textContent = 'Cancel'; cancelBtn.style.marginLeft = '8px';
+  cancelBtn.addEventListener('click', () => bar.remove());
+  confirmBtn.addEventListener('click', async () => {
+    confirmBtn.disabled = true;
+    await deleteCaseCascade(currentCaseId);
+    caseDetailScreen.classList.add('hidden');
+    casesScreen.classList.remove('hidden');
+    loadCaseList();
+  });
+  bar.append(msg, confirmBtn, cancelBtn);
+  document.querySelector('.case-detail-header').insertAdjacentElement('afterend', bar);
 });
 
 let currentCaseId = null;
@@ -371,7 +468,11 @@ async function openCaseDetail(caseId) {
   expandedSamples = new Set();
   notesShown = false;
   toggleNotesBtn.classList.remove('active');
-  toggleNotesBtn.textContent = 'Notes';
+  toggleNotesBtn.title = 'Notes';
+  toggleNotesBtn.setAttribute('aria-label', 'Notes');
+  editInfoBtn.classList.remove('active');
+  const existingConfirm = document.getElementById('caseDeleteConfirm');
+  if (existingConfirm) existingConfirm.remove();
   caseMainView.classList.remove('hidden');
   caseNotesView.classList.add('hidden');
   casesScreen.classList.add('hidden');
@@ -415,7 +516,10 @@ async function renderCaseDetail(caseId) {
   const freshSnap = await getDoc(doc(db, 'cases', caseId));
   const cFresh = { id: caseId, ...freshSnap.data() };
 
-  caseDetailTitle.textContent = caseTitle(cFresh);
+  caseDetailTitle.textContent = caseHeaderText(cFresh);
+  editInfoBtn.classList.toggle('hidden', !canUpdateCase(cFresh));
+  editInfoBtn.classList.toggle('active', infoEditMode);
+  deleteCaseBtn.classList.toggle('hidden', myProfile.role !== 'team_leader');
   caseMainView.innerHTML = '';
   caseMainView.appendChild(buildInfoSection(cFresh));
   caseMainView.appendChild(buildWorkflowSection(cFresh, samples));
@@ -423,9 +527,9 @@ async function renderCaseDetail(caseId) {
 }
 
 // ---------------------------------------------------------------------
-// Info section -- compact (default) vs full/editable, toggled via a
-// plain "Edit info" button. Scope is the case's own info fields only,
-// never samples or workflow (see SPEC.md's "Case info display").
+// Info section -- compact (default) vs full/editable, toggled via the
+// header's edit icon (editInfoBtn). Scope is the case's own info fields
+// only, never samples or workflow (see SPEC.md's "Case info display").
 // ---------------------------------------------------------------------
 function infoRow(label, valueText) {
   const row = document.createElement('div');
@@ -447,26 +551,18 @@ function clientDisplayText(c) {
 function buildInfoSection(c) {
   const section = document.createElement('div');
   section.className = 'case-section';
-  const h3 = document.createElement('h3');
-  h3.textContent = 'Info';
-  const editBtn = document.createElement('button');
-  editBtn.type = 'button';
-  editBtn.className = 'btn btn-small';
-  editBtn.textContent = infoEditMode ? 'Done editing' : 'Edit info';
-  editBtn.addEventListener('click', () => { infoEditMode = !infoEditMode; renderCaseDetail(c.id); });
-  h3.appendChild(editBtn);
-  section.appendChild(h3);
 
   const canEdit = myProfile.role === 'team_leader' || c.caseManager === myProfile.username;
 
   // Compact view deliberately minimal: case number/client case number/
-  // name/case manager/due date are all already visible in the case title
-  // above (see caseTitle()), so repeating them here was pure redundancy.
-  // On-hold/research/high-priority no longer show as a separate checklist
-  // either -- they're folded into the status text itself now (see
-  // effectiveStatusText()). Full editing (all fields, all toggles) is
-  // still available via "Edit info" below -- only the read-only summary
-  // shrank, not what's actually editable.
+  // name/due date are all already visible in the case header above (see
+  // caseHeaderText()), so repeating them here was pure redundancy. Case
+  // manager isn't in the header but also isn't shown compact -- only via
+  // full edit. On-hold/research/high-priority no longer show as a separate
+  // checklist either -- they're folded into the status text itself now
+  // (see effectiveStatusText()). Full editing (all fields, all toggles) is
+  // still available via the header's edit icon -- only the read-only
+  // summary shrank, not what's actually editable.
   if (!infoEditMode || !canEdit) {
     section.appendChild(infoRow('Client', clientDisplayText(c)));
     return section;
@@ -684,13 +780,6 @@ function buildWorkflowSection(c, samples) {
     section.appendChild(p);
   }
 
-  // Deletion: any case, any stage, team-leader judgment call (0.4.1 --
-  // no longer tied to reaching `done`; setup/firestore.rules already
-  // enforces team_leader-only, unchanged from Iteration 4).
-  if (myProfile.role === 'team_leader') {
-    section.appendChild(buildDeleteCaseControl(c));
-  }
-
   return section;
 }
 
@@ -808,39 +897,6 @@ function buildArchivingItemRow(c, item, idx, editAllowed) {
   }
   row.appendChild(controls);
   return row;
-}
-
-function buildDeleteCaseControl(c) {
-  const wrap = document.createElement('div');
-  wrap.style.marginTop = '20px';
-  const btn = document.createElement('button');
-  btn.className = 'btn'; btn.textContent = 'Delete case';
-  wrap.appendChild(btn);
-
-  btn.addEventListener('click', () => {
-    if (wrap.querySelector('.confirm-row')) return;
-    const confirmRow = document.createElement('div');
-    confirmRow.className = 'confirm-row';
-    confirmRow.style.marginTop = '10px';
-    const msg = document.createElement('p'); msg.className = 'error';
-    msg.textContent = 'This permanently deletes the case and everything in it. This cannot be undone.';
-    const confirmBtn = document.createElement('button');
-    confirmBtn.className = 'btn btn-small btn-primary'; confirmBtn.textContent = 'Confirm delete';
-    const cancelBtn = document.createElement('button');
-    cancelBtn.className = 'btn btn-small'; cancelBtn.textContent = 'Cancel'; cancelBtn.style.marginLeft = '8px';
-    cancelBtn.addEventListener('click', () => confirmRow.remove());
-    confirmBtn.addEventListener('click', async () => {
-      confirmBtn.disabled = true;
-      await deleteCaseCascade(c.id);
-      caseDetailScreen.classList.add('hidden');
-      casesScreen.classList.remove('hidden');
-      loadCaseList();
-    });
-    confirmRow.append(msg, confirmBtn, cancelBtn);
-    wrap.appendChild(confirmRow);
-  });
-
-  return wrap;
 }
 
 // Firestore doesn't cascade-delete subcollections -- every sample,

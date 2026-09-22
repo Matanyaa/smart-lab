@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Smart Lab (Test)</title>
-<link rel="icon" type="image/svg+xml" href="icon.svg?v=0.4.1-t11">
+<link rel="icon" type="image/svg+xml" href="icon.svg?v=0.4.1-t12">
 <meta name="theme-color" content="#141a1f">
 <style>
   :root{
@@ -55,6 +55,11 @@
   }
   .icon-btn:hover{border-color:var(--accent-dim);}
   .icon-btn svg{width:18px; height:18px;}
+  .icon-btn.active{background:var(--accent-dim); border-color:var(--accent); color:var(--text);}
+  .icon-btn-danger{color:var(--err); border-color:var(--err);}
+  .icon-btn-danger:hover{background:var(--err); color:#2a0e08;}
+  .icon-btn-small{width:28px; height:28px;}
+  .icon-btn-small svg{width:14px; height:14px;}
 
   main{min-height:calc(100vh - 45px); display:flex; flex-direction:column; align-items:center; padding:24px; gap:20px;}
   .card{background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:32px 28px; max-width:360px; width:100%; margin:auto;}
@@ -107,9 +112,11 @@
 
   .type-card{margin-bottom:20px;}
   .type-card h2{margin:0 0 10px; font-size:16px;}
-  .case-row-item{padding:10px 0; border-bottom:1px solid var(--border-soft); cursor:pointer;}
+  .case-row-item{padding:10px 0; border-bottom:1px solid var(--border-soft); cursor:pointer; display:flex; align-items:center; justify-content:space-between; gap:10px;}
   .case-row-item:last-child{border-bottom:none;}
   .case-row-item:hover{background:var(--panel2);}
+  .case-row-content{flex:1; min-width:0;}
+  .case-row-delete{position:relative; flex-shrink:0;}
   .case-row-top{font-size:14px; font-weight:600;}
   .case-row-bottom{display:flex; justify-content:space-between; align-items:center; margin-top:4px; gap:10px;}
   .case-row-meta{font-size:12px; color:var(--text-dim);}
@@ -164,7 +171,7 @@
 
 <header>
   <div class="brand-block" id="headerLogo">
-    <img src="icon.svg?v=0.4.1-t11" alt="">
+    <img src="icon.svg?v=0.4.1-t12" alt="">
     <div class="brand-text">
       <h1>smart-lab</h1>
       <span class="version-sub" id="versionBadge"></span>
@@ -368,7 +375,28 @@
   <div id="caseDetailScreen" class="card hidden">
     <div class="case-detail-header">
       <button type="button" class="btn btn-small" id="backToCasesBtn">&larr; Back to cases</button>
-      <button type="button" class="btn btn-small" id="toggleNotesBtn">Notes</button>
+      <div class="header-actions">
+        <button type="button" class="icon-btn" id="toggleNotesBtn" title="Notes" aria-label="Notes">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14 3v4a1 1 0 0 0 1 1h4"></path>
+            <path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2z"></path>
+            <path d="M9 9H8M16 13H8M16 17H8"></path>
+          </svg>
+        </button>
+        <button type="button" class="icon-btn hidden" id="editInfoBtn" title="Edit info" aria-label="Edit info">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path>
+          </svg>
+        </button>
+        <button type="button" class="icon-btn icon-btn-danger hidden" id="deleteCaseBtn" title="Delete case" aria-label="Delete case">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="3 6 5 6 21 6"></polyline>
+            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path>
+            <path d="M10 11v6M14 11v6"></path>
+            <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path>
+          </svg>
+        </button>
+      </div>
     </div>
     <p class="case-title" id="caseDetailTitle"></p>
     <div id="caseMainView"></div>
@@ -397,13 +425,13 @@
   </div>
 </div>
 
-<script type="module" src="js/auth-ui.js?v=0.4.1-t11"></script>
-<script type="module" src="js/admin-ui.js?v=0.4.1-t11"></script>
-<script type="module" src="js/case-types-ui.js?v=0.4.1-t11"></script>
-<script type="module" src="js/clients-ui.js?v=0.4.1-t11"></script>
-<script type="module" src="js/cases.js?v=0.4.1-t11"></script>
-<script type="module" src="js/client-view.js?v=0.4.1-t11"></script>
-<script type="module" src="js/update-banner.js?v=0.4.1-t11"></script>
-<script type="module" src="js/changelog.js?v=0.4.1-t11"></script>
+<script type="module" src="js/auth-ui.js?v=0.4.1-t12"></script>
+<script type="module" src="js/admin-ui.js?v=0.4.1-t12"></script>
+<script type="module" src="js/case-types-ui.js?v=0.4.1-t12"></script>
+<script type="module" src="js/clients-ui.js?v=0.4.1-t12"></script>
+<script type="module" src="js/cases.js?v=0.4.1-t12"></script>
+<script type="module" src="js/client-view.js?v=0.4.1-t12"></script>
+<script type="module" src="js/update-banner.js?v=0.4.1-t12"></script>
+<script type="module" src="js/changelog.js?v=0.4.1-t12"></script>
 </body>
 </html>
