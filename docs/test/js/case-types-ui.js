@@ -1,9 +1,9 @@
-import { db } from './firebase-init.js?v=0.5.0-t02';
+import { db } from './firebase-init.js?v=0.5.0-t03';
 import {
   doc, updateDoc, deleteDoc, collection, getDocs, addDoc
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { newTaskNode, newActionNode, emptyWorkflow, updateAtPath } from './workflow.js?v=0.5.0-t02';
-import { loadCatalog, getCachedActionDefs, getCachedTaskDefs, actionDefPath, nodeFromActionDef, nodeFromTaskDef } from './catalog-ui.js?v=0.5.0-t02';
+import { newTaskNode, newActionNode, emptyWorkflow, updateAtPath } from './workflow.js?v=0.5.0-t03';
+import { loadCatalog, getCachedActionDefs, getCachedTaskDefs, actionDefPath, nodeFromActionDef, nodeFromTaskDef } from './catalog-ui.js?v=0.5.0-t03';
 
 // ---------------------------------------------------------------------
 // Admin: case type CRUD, plus the 0.5.0 Workflow-template authoring
@@ -12,7 +12,7 @@ import { loadCatalog, getCachedActionDefs, getCachedTaskDefs, actionDefPath, nod
 // "Seed default workflow" checkbox that stood in for a real editor) is
 // what a new case's own Workflow gets deep-copied from at creation --
 // see cases.js/workflow.js. Phase 1 per TASK.md: plain top-to-bottom
-// add/remove/edit, no drag-reorder. 0.5.0-t02 added the reusable Action/Task
+// add/remove/edit, no drag-reorder. 0.5.0-t03 added the reusable Action/Task
 // catalog (catalog-ui.js, the new admin Workflow tab) -- every level of
 // this editor now also offers "+ From catalog" alongside "+ Task"/
 // "+ Action", inserting a copy of a catalog definition (see

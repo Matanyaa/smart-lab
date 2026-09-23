@@ -1,15 +1,19 @@
-import { db } from './firebase-init.js?v=0.5.0-t02';
+import { db } from './firebase-init.js?v=0.5.0-t03';
 import {
   collection, doc, getDoc, getDocs, addDoc, updateDoc, deleteDoc, query, where, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { loadCaseTypes, getCachedCaseTypes, findCaseTypeById } from './case-types-ui.js?v=0.5.0-t02';
+import { loadCaseTypes, getCachedCaseTypes, findCaseTypeById } from './case-types-ui.js?v=0.5.0-t03';
 import {
   loadClientOrgsAndClients, getCachedClientOrgs, getCachedClientsForOrg, fetchClientsForOrg,
   findClientById, findClientOrgById
-} from './clients-ui.js?v=0.5.0-t02';
+} from './clients-ui.js?v=0.5.0-t03';
 import {
-  emptyWorkflow, seedWorkflow, isTaskDone, currentPathOf, updateAtPath, recomputeAdvancement
-} from './workflow.js?v=0.5.0-t02';
+  emptyWorkflow, seedWorkflow, isTaskDone, currentPathOf, updateAtPath, recomputeAdvancement,
+  newTaskNode, newActionNode
+} from './workflow.js?v=0.5.0-t03';
+import {
+  loadCatalog, getCachedActionDefs, getCachedTaskDefs, actionDefPath, nodeFromActionDef, nodeFromTaskDef
+} from './catalog-ui.js?v=0.5.0-t03';
 
 // ---------------------------------------------------------------------
 // Core case/sample/workflow model. Internal to the lab team -- admin has
@@ -54,6 +58,7 @@ let expandedSamples = new Set();
 let editingSamples = new Set();
 let notesShown = false;
 let viewedPath = null; // null = follow the workflow's real current path (see workflow.js's currentPathOf)
+let workflowEditMode = false;
 
 export function hideCasesScreen() {
   casesScreen.classList.add('hidden');
@@ -479,6 +484,7 @@ async function openCaseDetail(caseId) {
   expandedSamples = new Set();
   notesShown = false;
   viewedPath = null;
+  workflowEditMode = false;
   toggleNotesBtn.classList.remove('active');
   toggleNotesBtn.title = 'Notes';
   toggleNotesBtn.setAttribute('aria-label', 'Notes');
@@ -490,6 +496,9 @@ async function openCaseDetail(caseId) {
   casesScreen.classList.add('hidden');
   caseDetailScreen.classList.remove('hidden');
   caseMainView.innerHTML = '<p class="muted">Loading…</p>';
+  // Loaded here (not just lazily by buildWorkflowSection) so the "+ From
+  // catalog" picker in edit mode has data ready the first time it's shown.
+  await loadCatalog();
   await renderCaseDetail(caseId);
 }
 
@@ -751,14 +760,52 @@ function buildWorkflowSection(c, samples) {
   h3.textContent = 'Workflow';
   section.appendChild(h3);
 
+  // Edit mode (2026-09-23, at the user's request): lets whoever can edit
+  // the case's own info fields (team_leader or this case's caseManager --
+  // same gate as editInfoBtn, a notch above "any case staff can execute
+  // tasks") restructure the case's own Workflow in place -- add/remove
+  // items at any level, insert from the catalog -- instead of it being
+  // frozen at whatever the case type's template had at creation. Same
+  // toggle-icon pattern as editInfoBtn.
+  const editAllowed = canUpdateCase(c);
+  if (editAllowed) {
+    const editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.className = 'icon-btn icon-btn-small icon-btn-accent' + (workflowEditMode ? ' active' : '');
+    editBtn.style.marginLeft = '10px';
+    editBtn.title = workflowEditMode ? 'Done editing' : 'Edit workflow';
+    editBtn.setAttribute('aria-label', editBtn.title);
+    editBtn.innerHTML = EDIT_ICON_SVG;
+    editBtn.addEventListener('click', () => {
+      workflowEditMode = !workflowEditMode;
+      renderCaseDetail(c.id);
+    });
+    h3.appendChild(editBtn);
+  }
+
   if (!c.workflow.items || c.workflow.items.length === 0) {
-    section.appendChild(readonlyNote('No workflow defined for this case type yet.'));
+    section.appendChild(buildEmptyWorkflowLevel(c, c.workflow, [], 'No workflow defined for this case type yet.'));
     return section;
   }
 
   if (!viewedPath) viewedPath = currentPathOf(c.workflow);
   section.appendChild(buildWorkflowLevel(c, c.workflow, [], samples, true));
   return section;
+}
+
+// An items[]-bearing level with nothing in it yet -- either a genuinely
+// empty top-level Workflow (case type had no template) or an Action node
+// with no children yet. No circles to show (buildWorkflowLevel assumes at
+// least one item), so this is its own small branch: an add-controls panel
+// in edit mode, a plain note otherwise.
+function buildEmptyWorkflowLevel(c, workflowLike, ancestorPath, emptyLabel) {
+  const wrap = document.createElement('div');
+  if (workflowEditMode && canUpdateCase(c)) {
+    wrap.appendChild(buildWorkflowLevelEditControls(c, workflowLike, ancestorPath));
+  } else {
+    wrap.appendChild(readonlyNote(emptyLabel));
+  }
+  return wrap;
 }
 
 // One items[]-bearing level (the case's own top-level Workflow, or any
@@ -800,12 +847,16 @@ function buildWorkflowLevel(c, workflowLike, ancestorPath, samples, ancestorLive
   });
   wrap.appendChild(flow);
 
+  if (workflowEditMode && canUpdateCase(c)) {
+    wrap.appendChild(buildWorkflowLevelEditControls(c, workflowLike, ancestorPath));
+  }
+
   const viewedNode = workflowLike.items[viewedIdx];
   const isLiveHere = ancestorLive && viewedIdx === realCurrentIdx;
 
   if (viewedNode.kind === 'action') {
     if (!viewedNode.items || viewedNode.items.length === 0) {
-      wrap.appendChild(readonlyNote(`${viewedNode.name}: no steps yet.`));
+      wrap.appendChild(buildEmptyWorkflowLevel(c, viewedNode, [...ancestorPath, viewedIdx], `${viewedNode.name}: no steps yet.`));
     } else {
       wrap.appendChild(buildWorkflowLevel(c, viewedNode, [...ancestorPath, viewedIdx], samples, isLiveHere));
     }
@@ -814,6 +865,120 @@ function buildWorkflowLevel(c, workflowLike, ancestorPath, samples, ancestorLive
   }
 
   return wrap;
+}
+
+// Structural editing for one items[]-bearing level of a LIVE case's own
+// Workflow -- add a blank Task/Action, insert a copy from the catalog
+// (same "+ From catalog" picker as the case-type template editor, see
+// catalog-ui.js), or rename/remove an existing item. Every change writes
+// the whole `workflow` field back (via saveWorkflowStructure) and
+// re-renders, same read-modify-write pattern used throughout this app.
+function buildWorkflowLevelEditControls(c, workflowLike, ancestorPath) {
+  const wrap = document.createElement('div');
+  wrap.className = 'workflow-editor-level';
+
+  workflowLike.items.forEach((node, idx) => {
+    const row = document.createElement('div'); row.className = 'workflow-node-editor';
+    const header = document.createElement('div');
+    header.style.cssText = 'display:flex; gap:8px; align-items:center; position:relative;';
+
+    const kindTag = document.createElement('span'); kindTag.className = 'badge';
+    kindTag.textContent = node.kind === 'action' ? 'Action' : 'Task';
+
+    const nameInput = document.createElement('input');
+    nameInput.value = node.name; nameInput.style.flex = '1';
+    nameInput.addEventListener('change', () => saveWorkflowStructure(c, ancestorPath, (level) => ({
+      ...level,
+      items: level.items.map((n, i) => (i === idx ? { ...n, name: nameInput.value.trim() || n.name } : n))
+    })));
+
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button'; removeBtn.className = 'icon-btn icon-btn-small icon-btn-danger';
+    removeBtn.title = 'Remove'; removeBtn.setAttribute('aria-label', 'Remove');
+    removeBtn.innerHTML = TRASH_ICON_SVG;
+    removeBtn.addEventListener('click', () => {
+      if (header.querySelector('.confirm-row')) return;
+      const confirmRow = document.createElement('div');
+      confirmRow.className = 'confirm-row';
+      confirmRow.style.cssText = 'position:absolute; right:0; top:34px; background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:10px; width:230px; z-index:5;';
+      const msg = document.createElement('p'); msg.className = 'error'; msg.style.margin = '0 0 8px';
+      msg.textContent = node.kind === 'action'
+        ? `Remove "${node.name}" and everything nested under it?`
+        : `Remove "${node.name}"? Any recorded execution/verification on it is lost.`;
+      const confirmBtn = document.createElement('button');
+      confirmBtn.type = 'button'; confirmBtn.className = 'btn btn-small btn-primary'; confirmBtn.textContent = 'Confirm';
+      const cancelBtn = document.createElement('button');
+      cancelBtn.type = 'button'; cancelBtn.className = 'btn btn-small'; cancelBtn.textContent = 'Cancel'; cancelBtn.style.marginLeft = '8px';
+      cancelBtn.addEventListener('click', () => confirmRow.remove());
+      confirmBtn.addEventListener('click', () => saveWorkflowStructure(c, ancestorPath, (level) => ({
+        ...level, items: level.items.filter((_, i) => i !== idx)
+      })));
+      confirmRow.append(msg, confirmBtn, cancelBtn);
+      header.appendChild(confirmRow);
+    });
+
+    header.append(kindTag, nameInput, removeBtn);
+    row.appendChild(header);
+    wrap.appendChild(row);
+  });
+
+  const addRow = document.createElement('div');
+  addRow.style.cssText = 'display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;';
+  const addTaskBtn = document.createElement('button');
+  addTaskBtn.type = 'button'; addTaskBtn.className = 'btn btn-small'; addTaskBtn.textContent = '+ Task';
+  addTaskBtn.addEventListener('click', () => saveWorkflowStructure(c, ancestorPath, (level) => ({
+    ...level, items: [...level.items, newTaskNode('New task')]
+  })));
+  const addActionBtn = document.createElement('button');
+  addActionBtn.type = 'button'; addActionBtn.className = 'btn btn-small'; addActionBtn.textContent = '+ Action';
+  addActionBtn.addEventListener('click', () => saveWorkflowStructure(c, ancestorPath, (level) => ({
+    ...level, items: [...level.items, newActionNode('New action')]
+  })));
+  addRow.append(addTaskBtn, addActionBtn);
+  wrap.appendChild(addRow);
+  wrap.appendChild(buildCatalogPickerForCase(c, ancestorPath));
+
+  return wrap;
+}
+
+function buildCatalogPickerForCase(c, ancestorPath) {
+  const row = document.createElement('div'); row.className = 'catalog-picker-row';
+  const select = document.createElement('select');
+  const blankOpt = document.createElement('option'); blankOpt.value = ''; blankOpt.textContent = '(pick from catalog)';
+  select.appendChild(blankOpt);
+  getCachedActionDefs().forEach((a) => {
+    const opt = document.createElement('option');
+    opt.value = `action:${a.id}`; opt.textContent = `Action: ${actionDefPath(a.id)}`;
+    select.appendChild(opt);
+  });
+  getCachedTaskDefs().forEach((t) => {
+    const opt = document.createElement('option');
+    opt.value = `task:${t.id}`;
+    opt.textContent = `Task: ${t.parentId ? actionDefPath(t.parentId) + ' > ' + t.name : t.name}`;
+    select.appendChild(opt);
+  });
+
+  const insertBtn = document.createElement('button');
+  insertBtn.type = 'button'; insertBtn.className = 'btn btn-small'; insertBtn.textContent = '+ From catalog';
+  insertBtn.addEventListener('click', () => {
+    if (!select.value) return;
+    const [kind, id] = select.value.split(':');
+    const node = kind === 'action' ? nodeFromActionDef(id) : nodeFromTaskDef(id);
+    if (node) saveWorkflowStructure(c, ancestorPath, (level) => ({ ...level, items: [...level.items, node] }));
+  });
+
+  row.append(select, insertBtn);
+  return row;
+}
+
+async function saveWorkflowStructure(c, path, mutator) {
+  const updated = updateAtPath(c.workflow, path, mutator);
+  // A structural edit (item added/removed) can leave a level's
+  // currentIndex out of bounds or newly satisfy the advance condition --
+  // recomputeAdvancement re-clamps and re-cascades from scratch.
+  recomputeAdvancement(updated);
+  await updateDoc(doc(db, 'test_cases', c.id), { workflow: updated });
+  await renderCaseDetail(c.id);
 }
 
 function taskStatusSummary(task) {

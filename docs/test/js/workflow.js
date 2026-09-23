@@ -148,6 +148,11 @@ export function recomputeAdvancement(workflowLike) {
   workflowLike.items.forEach((node) => {
     if (node.kind === 'action') recomputeAdvancement(node);
   });
+  if (workflowLike.items.length === 0) { workflowLike.currentIndex = 0; return; }
+  // Clamp first -- a live case's own workflow can now be structurally
+  // edited (items added/removed) after creation, which can leave a
+  // previously-valid currentIndex pointing past the end.
+  workflowLike.currentIndex = Math.min(workflowLike.currentIndex || 0, workflowLike.items.length - 1);
   while (
     workflowLike.currentIndex < workflowLike.items.length - 1 &&
     isNodeDone(workflowLike.items[workflowLike.currentIndex]) &&

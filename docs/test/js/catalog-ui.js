@@ -1,11 +1,11 @@
-import { db } from './firebase-init.js?v=0.5.0-t02';
+import { db } from './firebase-init.js?v=0.5.0-t03';
 import {
   collection, doc, getDocs, addDoc, deleteDoc
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { newTaskNode, newActionNode } from './workflow.js?v=0.5.0-t02';
+import { newTaskNode, newActionNode } from './workflow.js?v=0.5.0-t03';
 
 // ---------------------------------------------------------------------
-// Admin: reusable Action/Task catalog (0.5.0-t02), at the user's request --
+// Admin: reusable Action/Task catalog (0.5.0-t03), at the user's request --
 // named definitions ("action definitions" in `test_actionDefs`, "task
 // definitions" in `test_taskDefs`) admin builds once and can insert
 // wherever needed while authoring a case type's Workflow template

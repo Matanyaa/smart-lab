@@ -82,16 +82,18 @@ service cloud.firestore {
       allow read: if isSignedIn();
       allow write: if isAdmin();
     }
-    // 0.5.1: reusable Action/Task catalog (see workflow.js/catalog-ui.js) --
-    // admin-only both ways, narrower than caseTypes/clientOrgs/clients
-    // above, since the only thing reading it right now is the admin-only
-    // case-type Workflow editor's "+ From catalog" picker, not any
-    // staff-facing screen. Widen to isStaff() read if that changes.
+    // Reusable Action/Task catalog (see workflow.js/catalog-ui.js) -- write
+    // stays admin-only (only admin authors catalog definitions), but read
+    // widened to isStaff() (2026-09-23) once case-staff also got their own
+    // "+ From catalog" picker inside a live case's Workflow edit mode
+    // (cases.js) -- not just the admin-only case-type template editor.
     match /actionDefs/{actionDefId} {
-      allow read, write: if isAdmin();
+      allow read: if isStaff();
+      allow write: if isAdmin();
     }
     match /taskDefs/{taskDefId} {
-      allow read, write: if isAdmin();
+      allow read: if isStaff();
+      allow write: if isAdmin();
     }
 
     // 2026-09-22: `docs/test/` now reads/writes these same collections
@@ -115,10 +117,12 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
     match /test_actionDefs/{actionDefId} {
-      allow read, write: if isAdmin();
+      allow read: if isStaff();
+      allow write: if isAdmin();
     }
     match /test_taskDefs/{taskDefId} {
-      allow read, write: if isAdmin();
+      allow read: if isStaff();
+      allow write: if isAdmin();
     }
 
     match /cases/{caseId} {
