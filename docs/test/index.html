@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Smart Lab (Test)</title>
-<link rel="icon" type="image/svg+xml" href="icon.svg?v=0.6.0-t02">
+<link rel="icon" type="image/svg+xml" href="icon.svg?v=0.6.0-t03">
 <meta name="theme-color" content="#141a1f">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -159,22 +159,23 @@
   .stage-flow{position:relative; display:flex; align-items:center; margin-bottom:18px; overflow-x:auto; padding:2px 2px 6px;}
   .stage-flow-node{
     flex-shrink:0; width:58px; height:58px; border-radius:50%; padding:4px;
-    display:flex; align-items:center; justify-content:center; text-align:center;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; gap:1px;
     background:var(--panel2); border:2px solid var(--border); color:var(--text-dim);
     font-family:var(--font-mono); font-size:10px; text-transform:uppercase; line-height:1.15;
     cursor:pointer;
   }
   .stage-flow-node:hover{border-color:var(--accent-dim);}
-  .stage-flow-node.done{border-color:var(--accent-dim); color:var(--text);}
-  .stage-flow-node.current{background:var(--accent); border-color:var(--accent); color:var(--accent-text); font-weight:600;}
+  /* Done: actually filled/colored, not just border-tinted, so it reads at
+     a glance. Current: a thicker ring instead of a fill, so "done" and
+     "current" stay visually distinct even when the same circle is both
+     (an all-done workflow's last, current item). */
+  .stage-flow-node.done{background:var(--accent-dim); border-color:var(--accent-dim); color:var(--accent-text);}
+  .stage-flow-node.current{border-width:4px; border-color:var(--accent); color:var(--text); font-weight:600;}
+  .stage-flow-node.current.done{color:var(--accent-text);}
   .stage-flow-node.viewed:not(.current){box-shadow:0 0 0 2px var(--panel), 0 0 0 4px var(--accent);}
+  .stage-flow-node-progress{font-size:8px; opacity:0.85;}
   .stage-flow-line{flex:1; height:2px; min-width:14px; background:var(--border-soft);}
   .stage-flow-line.done{background:var(--accent-dim);}
-  /* Implicit Start/End markers (SPEC.md) -- smaller, dimmer, no pointer
-     cursor, so they read as automatic bookends rather than real
-     clickable/editable stages. */
-  .stage-flow-marker{width:40px; height:40px; font-size:9px; cursor:default; opacity:0.7;}
-  .stage-flow-marker:hover{border-color:var(--border);}
 
   .add-row{display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; margin-top:10px;}
   .add-row .field{flex:1; min-width:120px; margin-bottom:0;}
@@ -204,6 +205,10 @@
      (case-types-ui.js) and case-detail execution view (cases.js). */
   .workflow-editor-level{margin:6px 0;}
   .workflow-node-editor{background:var(--panel2); border:1px solid var(--border); border-radius:var(--radius); padding:10px; margin-bottom:8px;}
+  .workflow-node-editor.dragging{opacity:0.4;}
+  .workflow-node-editor.drag-over{border-color:var(--accent);}
+  .drag-handle{cursor:grab; color:var(--text-dim); padding:0 2px; font-size:16px; line-height:1; -webkit-user-select:none; user-select:none;}
+  .drag-handle:active{cursor:grabbing;}
   .workflow-node-nested{margin:10px 0 0 18px; padding-left:12px; border-left:2px solid var(--border-soft);}
   .workflow-task-fields{margin-top:8px;}
   .workflow-task-fields > label{margin-top:10px;}
@@ -215,7 +220,7 @@
   .task-execute-form .field{margin-bottom:10px;}
   .task-assignment{margin:10px 0;}
 
-  /* 0.6.0-t02: Workflow admin tab -- reusable Action/Task catalog. */
+  /* 0.6.0-t03: Workflow admin tab -- reusable Action/Task catalog. */
   .workflow-catalog-section{margin-top:22px;}
   .workflow-catalog-section:first-of-type{margin-top:14px;}
   .workflow-catalog-section h3{margin:0 0 10px; font-size:14px;}
@@ -232,7 +237,7 @@
 
 <header>
   <div class="brand-block" id="headerLogo">
-    <img src="icon.svg?v=0.6.0-t02" alt="">
+    <img src="icon.svg?v=0.6.0-t03" alt="">
     <div class="brand-text">
       <h1>smart-lab</h1>
       <span class="version-sub" id="versionBadge"></span>
@@ -493,13 +498,13 @@
   </div>
 </div>
 
-<script type="module" src="js/auth-ui.js?v=0.6.0-t02"></script>
-<script type="module" src="js/admin-ui.js?v=0.6.0-t02"></script>
-<script type="module" src="js/case-types-ui.js?v=0.6.0-t02"></script>
-<script type="module" src="js/clients-ui.js?v=0.6.0-t02"></script>
-<script type="module" src="js/cases.js?v=0.6.0-t02"></script>
-<script type="module" src="js/client-view.js?v=0.6.0-t02"></script>
-<script type="module" src="js/update-banner.js?v=0.6.0-t02"></script>
-<script type="module" src="js/changelog.js?v=0.6.0-t02"></script>
+<script type="module" src="js/auth-ui.js?v=0.6.0-t03"></script>
+<script type="module" src="js/admin-ui.js?v=0.6.0-t03"></script>
+<script type="module" src="js/case-types-ui.js?v=0.6.0-t03"></script>
+<script type="module" src="js/clients-ui.js?v=0.6.0-t03"></script>
+<script type="module" src="js/cases.js?v=0.6.0-t03"></script>
+<script type="module" src="js/client-view.js?v=0.6.0-t03"></script>
+<script type="module" src="js/update-banner.js?v=0.6.0-t03"></script>
+<script type="module" src="js/changelog.js?v=0.6.0-t03"></script>
 </body>
 </html>

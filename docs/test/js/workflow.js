@@ -105,29 +105,68 @@ export function updateAtPath(workflowLike, path, updater) {
   return { ...workflowLike, items };
 }
 
-// Advancement (SPEC.md): the moment the current action in a workflow is
-// done, it auto-advances immediately to the next one -- no waiting
-// condition on the next action at all (unlike 0.5.0's "next item's first
-// task has started" rule; there's no separate "started" state anymore,
-// entering an action just is passing its own implicit Start). Forward-
-// only, cascading from wherever currentIndex sits, mutating in place
-// bottom-up. The long-press force-jump is the only way back -- see
-// SPEC.md's Open Questions on whether that should change; not decided,
-// not built here.
-export function recomputeAdvancement(workflowLike) {
+// Advancement (SPEC.md's Open Questions, resolved 2026-09-23 at the
+// user's direct request): current is always the *leftmost not-done item*
+// -- fully derived fresh every time, not just cascaded forward. This
+// makes it bidirectional for free: adding a new (never-done) item before
+// or at the old current position pulls current back to it, and un-marking
+// an already-passed item done pulls current back to that item too. An
+// all-done level's current sits at its last item.
+//
+// `exemptPath`, when given, is the path (relative to this call) to a
+// level whose own currentIndex was just force-set by a long-press
+// override and should be left alone by *this* call -- its own nested
+// children are still recomputed normally underneath it, so it stays
+// internally consistent, but the forced position itself isn't
+// immediately overwritten by the same save that set it. A later,
+// unrelated save (no exemptPath) will still re-derive it normally, so a
+// force-jump is a real but not permanently-sticky override -- it holds
+// until the next real progress/edit anywhere touches this tree. Not
+// asked for explicitly; a judgment call reconciling force-jump with the
+// new bidirectional rule, logged in HANDOFF.md.
+export function recomputeAdvancement(workflowLike, exemptPath = null) {
   if (!workflowLike || !workflowLike.items) return;
-  workflowLike.items.forEach((node) => {
-    if (node.kind === 'container') recomputeAdvancement(node);
+  const exemptHere = !!exemptPath && exemptPath.length === 0;
+  workflowLike.items.forEach((node, idx) => {
+    if (node.kind !== 'container') return;
+    const childExempt = exemptPath && exemptPath.length > 0 && exemptPath[0] === idx ? exemptPath.slice(1) : null;
+    recomputeAdvancement(node, childExempt);
   });
+  if (exemptHere) return;
   if (workflowLike.items.length === 0) { workflowLike.currentIndex = 0; return; }
-  // Clamp first -- a live case's own workflow can be structurally edited
-  // (items added/removed) after creation, which can leave a previously-
-  // valid currentIndex pointing past the end.
-  workflowLike.currentIndex = Math.min(workflowLike.currentIndex || 0, workflowLike.items.length - 1);
-  while (
-    workflowLike.currentIndex < workflowLike.items.length - 1 &&
-    isNodeDone(workflowLike.items[workflowLike.currentIndex])
-  ) {
-    workflowLike.currentIndex++;
-  }
+  let idx = 0;
+  while (idx < workflowLike.items.length - 1 && isNodeDone(workflowLike.items[idx])) idx++;
+  workflowLike.currentIndex = idx;
+}
+
+// [doneCount, totalCount] of terminal actions nested anywhere under a
+// node (a terminal node is trivially [1,1] or [0,1]) -- used to show a
+// container's own partial-completion progress ("2/5") and proportional
+// fill in the stage-circle UI. totalCount 0 (an empty container) has no
+// meaningful fraction; callers should treat that as "fully done" (see
+// isNodeDone's vacuous-true) rather than dividing by zero.
+export function doneFraction(node) {
+  if (node.kind === 'terminal') return node.isDone ? [1, 1] : [0, 1];
+  let done = 0, total = 0;
+  (node.items || []).forEach((child) => {
+    const [d, t] = doneFraction(child);
+    done += d; total += t;
+  });
+  return [done, total];
+}
+
+// Moves the item at fromIdx to sit at toIdx within one level (a full
+// reorder, not just an adjacent swap -- covers both the ↑/↓ buttons and
+// drag-and-drop with the same function), keeping currentIndex pointing at
+// the same *item* through the move rather than the same numeric slot.
+export function moveItem(level, fromIdx, toIdx) {
+  if (fromIdx === toIdx) return level;
+  const items = [...level.items];
+  const [moved] = items.splice(fromIdx, 1);
+  items.splice(toIdx, 0, moved);
+  let currentIndex = level.currentIndex;
+  if (currentIndex === fromIdx) currentIndex = toIdx;
+  else if (fromIdx < currentIndex && currentIndex <= toIdx) currentIndex--;
+  else if (toIdx <= currentIndex && currentIndex < fromIdx) currentIndex++;
+  return { ...level, items, currentIndex };
 }

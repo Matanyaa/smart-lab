@@ -1,9 +1,9 @@
-import { db } from './firebase-init.js?v=0.6.0-t02';
+import { db } from './firebase-init.js?v=0.6.0-t03';
 import {
   doc, updateDoc, deleteDoc, collection, getDocs, addDoc
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { newTerminalNode, newParameter, emptyWorkflow, updateAtPath } from './workflow.js?v=0.6.0-t02';
-import { loadCatalog, actionDefsForContext, actionDefPath, nodeFromActionDef } from './catalog-ui.js?v=0.6.0-t02';
+import { newTerminalNode, newParameter, emptyWorkflow, updateAtPath, moveItem } from './workflow.js?v=0.6.0-t03';
+import { loadCatalog, actionDefsForContext, actionDefPath, nodeFromActionDef } from './catalog-ui.js?v=0.6.0-t03';
 
 // ---------------------------------------------------------------------
 // Admin: case type CRUD, plus the Workflow-template authoring screen. A
@@ -20,8 +20,8 @@ import { loadCatalog, actionDefsForContext, actionDefPath, nodeFromActionDef } f
 // upfront "which kind am I creating" choice in this editor, unlike the
 // catalog's own authoring form (catalog-ui.js), which keeps an explicit
 // Kind selector since a reusable library definition is a more deliberate
-// choice. Items can be reordered (↑/↓) within their own level -- still no
-// drag-and-drop, just swap-with-neighbor.
+// choice. Items can be reordered within their own level by dragging the
+// ⠿ handle, or with the ↑/↓ buttons.
 //
 // The "+ From catalog" picker is context-filtered (SPEC.md's hierarchy-
 // scoping): at the template root it only offers case-level
@@ -139,17 +139,6 @@ async function saveTemplate(ct, newWorkflow) {
   if (container) container.replaceChildren(buildItemsEditor(ct, [], ct.workflowTemplate, null));
 }
 
-// Swaps the items at i/j within one level, keeping currentIndex pointing
-// at the same *item* rather than the same numeric slot.
-function swapItems(level, i, j) {
-  const items = [...level.items];
-  [items[i], items[j]] = [items[j], items[i]];
-  let currentIndex = level.currentIndex;
-  if (currentIndex === i) currentIndex = j;
-  else if (currentIndex === j) currentIndex = i;
-  return { ...level, items, currentIndex };
-}
-
 // Recursive: renders one items[] level (the template root, or a
 // container's own nested items) with an add-action control plus each
 // child's own inline editor. `path` is the index path from the template
@@ -230,10 +219,10 @@ async function removeNode(ct, path) {
   await mutateNode(ct, parentPath, (level) => ({ ...level, items: level.items.filter((_, i) => i !== idx) }));
 }
 
-async function moveNode(ct, path, direction) {
+async function moveNode(ct, path, toIdx) {
   const parentPath = path.slice(0, -1);
   const idx = path[path.length - 1];
-  await mutateNode(ct, parentPath, (level) => swapItems(level, idx, idx + direction));
+  await mutateNode(ct, parentPath, (level) => moveItem(level, idx, toIdx));
 }
 
 function buildNodeEditor(ct, path, node, siblingCount) {
@@ -244,15 +233,36 @@ function buildNodeEditor(ct, path, node, siblingCount) {
   const header = document.createElement('div');
   header.style.cssText = 'display:flex; gap:6px; align-items:center; flex-wrap:wrap;';
 
+  // Native HTML5 drag-and-drop, triggered only from this small handle so
+  // dragging doesn't fight with selecting/editing text in the name input.
+  const dragHandle = document.createElement('span');
+  dragHandle.className = 'drag-handle'; dragHandle.title = 'Drag to reorder'; dragHandle.textContent = '⠿';
+  dragHandle.setAttribute('draggable', 'true');
+  box.addEventListener('dragstart', (e) => {
+    e.dataTransfer.setData('text/plain', String(idx));
+    e.dataTransfer.effectAllowed = 'move';
+    box.classList.add('dragging');
+  });
+  box.addEventListener('dragend', () => box.classList.remove('dragging'));
+  box.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; box.classList.add('drag-over'); });
+  box.addEventListener('dragleave', () => box.classList.remove('drag-over'));
+  box.addEventListener('drop', (e) => {
+    e.preventDefault();
+    box.classList.remove('drag-over');
+    const fromIdx = parseInt(e.dataTransfer.getData('text/plain'), 10);
+    if (Number.isNaN(fromIdx) || fromIdx === idx) return;
+    moveNode(ct, [...path.slice(0, -1), fromIdx], idx);
+  });
+
   const upBtn = document.createElement('button');
   upBtn.type = 'button'; upBtn.className = 'btn btn-small'; upBtn.textContent = '↑'; upBtn.title = 'Move up';
   upBtn.disabled = idx === 0;
-  upBtn.addEventListener('click', () => moveNode(ct, path, -1));
+  upBtn.addEventListener('click', () => moveNode(ct, path, idx - 1));
 
   const downBtn = document.createElement('button');
   downBtn.type = 'button'; downBtn.className = 'btn btn-small'; downBtn.textContent = '↓'; downBtn.title = 'Move down';
   downBtn.disabled = idx === siblingCount - 1;
-  downBtn.addEventListener('click', () => moveNode(ct, path, 1));
+  downBtn.addEventListener('click', () => moveNode(ct, path, idx + 1));
 
   const nameInput = document.createElement('input');
   nameInput.value = node.name;
@@ -275,7 +285,7 @@ function buildNodeEditor(ct, path, node, siblingCount) {
   removeBtn.title = 'Remove'; removeBtn.setAttribute('aria-label', 'Remove');
   removeBtn.innerHTML = TRASH_ICON_SVG;
   removeBtn.addEventListener('click', () => removeNode(ct, path));
-  header.append(upBtn, downBtn, nameInput, subActionBtn, removeBtn);
+  header.append(dragHandle, upBtn, downBtn, nameInput, subActionBtn, removeBtn);
   box.appendChild(header);
 
   if (node.kind === 'terminal') {

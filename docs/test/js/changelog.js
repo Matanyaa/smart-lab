@@ -1,4 +1,4 @@
-import { APP_VERSION } from './firebase-init.js?v=0.6.0-t02';
+import { APP_VERSION } from './firebase-init.js?v=0.6.0-t03';
 
 // Plain-language, user-facing history -- distinct from SPEC.md's Decisions
 // Log (design/build rationale) and HANDOFF.md (Claude Code's build notes).
@@ -54,9 +54,11 @@ const CHANGELOG = [
       'Admin can now build a case type\'s whole workflow from scratch -- add steps, nest steps inside a step, and set what each step asks for.',
       'New admin tab: Workflow. Define reusable named actions once (with an upper level, e.g. "Make sample" under "Lab") and insert them straight into any case type\'s workflow instead of rebuilding them from scratch every time.',
       'Case view: a case\'s own Workflow can now be edited in place (new Edit icon next to "Workflow") -- add or remove steps, rename one, or insert one from the catalog, without waiting on the case type\'s template.',
-      'Every workflow now shows Start and End circles around its steps.',
-      'Steps can be reordered with ↑/↓ while editing.',
-      'New "+ Sub-action" button on any step -- turns it into a container holding its own nested steps (e.g. adding "Draft" inside "Writing"), right from the case view or the case type\'s template editor.'
+      'New "+ Sub-action" button on any step -- turns it into a container holding its own nested steps (e.g. adding "Draft" inside "Writing"), right from the case view or the case type\'s template editor.',
+      'Steps can be reordered by dragging, or with ↑/↓, while editing.',
+      'Done steps are now filled with color; the current step gets a thicker outline instead.',
+      'A container step partway done now shows how many of its steps are finished (e.g. "2/5") and fills in proportionally.',
+      'The workflow now reverts automatically when it should: adding a new step to an already-finished workflow, or un-marking a step done, moves "current" back to the right place -- not just forward anymore.'
     ]
   }
 ];

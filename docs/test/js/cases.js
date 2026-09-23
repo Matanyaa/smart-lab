@@ -1,19 +1,19 @@
-import { db } from './firebase-init.js?v=0.6.0-t02';
+import { db } from './firebase-init.js?v=0.6.0-t03';
 import {
   collection, doc, getDoc, getDocs, addDoc, updateDoc, deleteDoc, query, where, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { loadCaseTypes, getCachedCaseTypes, findCaseTypeById } from './case-types-ui.js?v=0.6.0-t02';
+import { loadCaseTypes, getCachedCaseTypes, findCaseTypeById } from './case-types-ui.js?v=0.6.0-t03';
 import {
   loadClientOrgsAndClients, getCachedClientOrgs, getCachedClientsForOrg, fetchClientsForOrg,
   findClientById, findClientOrgById
-} from './clients-ui.js?v=0.6.0-t02';
+} from './clients-ui.js?v=0.6.0-t03';
 import {
-  emptyWorkflow, seedWorkflow, isNodeDone, currentPathOf, nodeAtPath, updateAtPath, recomputeAdvancement,
-  newTerminalNode
-} from './workflow.js?v=0.6.0-t02';
+  emptyWorkflow, seedWorkflow, isNodeDone, doneFraction, moveItem, currentPathOf, nodeAtPath, updateAtPath,
+  recomputeAdvancement, newTerminalNode
+} from './workflow.js?v=0.6.0-t03';
 import {
   loadCatalog, actionDefsForContext, actionDefPath, nodeFromActionDef
-} from './catalog-ui.js?v=0.6.0-t02';
+} from './catalog-ui.js?v=0.6.0-t03';
 
 // ---------------------------------------------------------------------
 // Core case/sample/workflow model. Internal to the lab team -- admin has
@@ -725,8 +725,11 @@ function attachLongPress(el, callback) {
 // Long-press a stage circle -> confirm popover -> forces workflowLike's own
 // currentIndex to `idx` regardless of whether the automatic advancement
 // condition is actually met (SPEC.md's "Manual override"). A plain tap
-// only ever *previews* (see buildWorkflowLevel) -- this is the one real
-// way to move backward, since recomputeAdvancement itself is forward-only.
+// only ever *previews* (see buildWorkflowLevel). Passes `ancestorPath` as
+// recomputeAdvancement's exemptPath so this exact level's forced value
+// isn't immediately overwritten by the same save -- it holds until the
+// next unrelated save re-derives it normally (see workflow.js's own
+// comment on this trade-off).
 function attachForceJump(btn, anchorEl, c, ancestorPath, idx, targetLabel) {
   attachLongPress(btn, () => {
     if (anchorEl.querySelector('.confirm-row')) return;
@@ -743,7 +746,7 @@ function attachForceJump(btn, anchorEl, c, ancestorPath, idx, targetLabel) {
     confirmBtn.addEventListener('click', async () => {
       confirmBtn.disabled = true;
       const updated = updateAtPath(c.workflow, ancestorPath, (level) => ({ ...level, currentIndex: idx }));
-      recomputeAdvancement(updated);
+      recomputeAdvancement(updated, ancestorPath);
       await updateDoc(doc(db, 'test_cases', c.id), { workflow: updated });
       viewedPath = [...ancestorPath, idx];
       await renderCaseDetail(c.id);
@@ -795,26 +798,11 @@ function buildWorkflowSection(c, samples) {
 
 // An items[]-bearing level with nothing in it yet -- either a genuinely
 // empty top-level Workflow (case type had no template) or a container
-// Action with no children yet. Still a Workflow, so it still gets its
-// implicit Start/End pair (immediately adjacent -- an empty workflow has
-// no last real action to wait on, so End is trivially reached the moment
-// Start is), just without buildWorkflowLevel's full items loop since
-// there's nothing to show between them. Add-controls panel in edit mode,
-// a plain note otherwise.
+// Action with no children yet. No circles to show (buildWorkflowLevel
+// assumes at least one item), so this is its own small branch: an
+// add-controls panel in edit mode, a plain note otherwise.
 function buildEmptyWorkflowLevel(c, workflowLike, ancestorPath, emptyLabel) {
   const wrap = document.createElement('div');
-
-  const flow = document.createElement('div'); flow.className = 'stage-flow';
-  const startNode = document.createElement('div');
-  startNode.className = 'stage-flow-node stage-flow-marker done';
-  startNode.textContent = 'Start';
-  const line = document.createElement('div'); line.className = 'stage-flow-line done';
-  const endNode = document.createElement('div');
-  endNode.className = 'stage-flow-node stage-flow-marker done';
-  endNode.textContent = 'End';
-  flow.append(startNode, line, endNode);
-  wrap.appendChild(flow);
-
   if (workflowEditMode && canUpdateCase(c)) {
     wrap.appendChild(buildWorkflowLevelEditControls(c, workflowLike, ancestorPath));
   } else {
@@ -842,19 +830,6 @@ function buildWorkflowLevel(c, workflowLike, ancestorPath, samples, ancestorLive
 
   const flow = document.createElement('div'); flow.className = 'stage-flow';
 
-  // Start/End (SPEC.md): every workflow implicitly has these -- never
-  // authored, never stored as real nodes. Start is "passed through" the
-  // instant this level becomes current, i.e. it's always shown done the
-  // moment we're viewing this level's contents at all; End is reached the
-  // instant the last real item is done. Plain markers, not buttons --
-  // nothing to click or force-jump to.
-  const startNode = document.createElement('div');
-  startNode.className = 'stage-flow-node stage-flow-marker done';
-  startNode.textContent = 'Start';
-  flow.appendChild(startNode);
-  const startLine = document.createElement('div'); startLine.className = 'stage-flow-line done';
-  flow.appendChild(startLine);
-
   workflowLike.items.forEach((node, idx) => {
     if (idx > 0) {
       const line = document.createElement('div');
@@ -865,24 +840,38 @@ function buildWorkflowLevel(c, workflowLike, ancestorPath, samples, ancestorLive
     const nodePath = [...ancestorPath, idx];
     const btn = document.createElement('button');
     btn.type = 'button'; btn.className = 'stage-flow-node';
-    if (idx < realCurrentIdx) btn.classList.add('done');
+    const isDone = idx < realCurrentIdx || (idx === realCurrentIdx && isNodeDone(node));
+    if (isDone) btn.classList.add('done');
     if (idx === realCurrentIdx) btn.classList.add('current');
     if (idx === viewedIdx) btn.classList.add('viewed');
-    btn.textContent = node.name;
+
+    // Containers show their own partial-completion progress -- an "x/y"
+    // count of done terminal descendants, plus a proportional conic-
+    // gradient fill for a genuinely partial state (0% and 100% just rely
+    // on the plain .done styling below, no gradient needed there).
+    const nameEl = document.createElement('div');
+    nameEl.textContent = node.name;
+    btn.appendChild(nameEl);
+    if (node.kind === 'container') {
+      const [doneCount, totalCount] = doneFraction(node);
+      if (totalCount > 0) {
+        const progEl = document.createElement('div');
+        progEl.className = 'stage-flow-node-progress';
+        progEl.textContent = `${doneCount}/${totalCount}`;
+        btn.appendChild(progEl);
+        if (doneCount > 0 && doneCount < totalCount) {
+          const pct = Math.round((doneCount / totalCount) * 100);
+          btn.style.background = `conic-gradient(var(--accent-dim) ${pct}%, var(--panel2) ${pct}% 100%)`;
+        }
+      }
+    }
+
     btn.title = node.name + (idx === realCurrentIdx ? ' (current -- long-press/right-click any circle to force-jump)' : '');
     if (idx === realCurrentIdx) btn.setAttribute('aria-current', 'step');
     btn.addEventListener('click', () => { viewedPath = nodePath; renderCaseDetail(c.id); });
     attachForceJump(btn, flow, c, ancestorPath, idx, node.name);
     flow.appendChild(btn);
   });
-
-  const reachedEnd = isNodeDone(workflowLike.items[workflowLike.items.length - 1]);
-  const endLine = document.createElement('div'); endLine.className = 'stage-flow-line' + (reachedEnd ? ' done' : '');
-  flow.appendChild(endLine);
-  const endNode = document.createElement('div');
-  endNode.className = 'stage-flow-node stage-flow-marker' + (reachedEnd ? ' done' : '');
-  endNode.textContent = 'End';
-  flow.appendChild(endNode);
 
   wrap.appendChild(flow);
 
@@ -918,26 +907,15 @@ function contextDefIdFor(c, ancestorPath) {
   return node ? (node.defId || null) : null;
 }
 
-// Swaps the items at i/j within one level, keeping currentIndex pointing
-// at the same *item* rather than the same numeric slot (so reordering
-// never silently makes an unrelated item look "current").
-function swapItems(level, i, j) {
-  const items = [...level.items];
-  [items[i], items[j]] = [items[j], items[i]];
-  let currentIndex = level.currentIndex;
-  if (currentIndex === i) currentIndex = j;
-  else if (currentIndex === j) currentIndex = i;
-  return { ...level, items, currentIndex };
-}
-
 // Structural editing for one items[]-bearing level of a LIVE case's own
 // Workflow -- add a blank action, insert a copy from the catalog
 // (context-filtered, same "+ From catalog" picker as the case-type
-// template editor, see catalog-ui.js), reorder/rename/remove an existing
-// item, or turn one into a container so it can hold its own sub-actions
-// (see the "+ Sub-action" button below). Every change writes the whole
-// `workflow` field back (via saveWorkflowStructure) and re-renders, same
-// read-modify-write pattern used throughout this app.
+// template editor, see catalog-ui.js), reorder (drag the handle, or the
+// ↑/↓ buttons)/rename/remove an existing item, or turn one into a
+// container so it can hold its own sub-actions (see the "+ Sub-action"
+// button below). Every change writes the whole `workflow` field back (via
+// saveWorkflowStructure) and re-renders, same read-modify-write pattern
+// used throughout this app.
 function buildWorkflowLevelEditControls(c, workflowLike, ancestorPath) {
   const wrap = document.createElement('div');
   wrap.className = 'workflow-editor-level';
@@ -947,15 +925,37 @@ function buildWorkflowLevelEditControls(c, workflowLike, ancestorPath) {
     const header = document.createElement('div');
     header.style.cssText = 'display:flex; gap:6px; align-items:center; position:relative; flex-wrap:wrap;';
 
+    // Native HTML5 drag-and-drop, triggered only from this small handle
+    // (not the whole row) so dragging doesn't fight with selecting/
+    // editing text in the name input right next to it.
+    const dragHandle = document.createElement('span');
+    dragHandle.className = 'drag-handle'; dragHandle.title = 'Drag to reorder'; dragHandle.textContent = '⠿';
+    dragHandle.setAttribute('draggable', 'true');
+    row.addEventListener('dragstart', (e) => {
+      e.dataTransfer.setData('text/plain', String(idx));
+      e.dataTransfer.effectAllowed = 'move';
+      row.classList.add('dragging');
+    });
+    row.addEventListener('dragend', () => row.classList.remove('dragging'));
+    row.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; row.classList.add('drag-over'); });
+    row.addEventListener('dragleave', () => row.classList.remove('drag-over'));
+    row.addEventListener('drop', (e) => {
+      e.preventDefault();
+      row.classList.remove('drag-over');
+      const fromIdx = parseInt(e.dataTransfer.getData('text/plain'), 10);
+      if (Number.isNaN(fromIdx) || fromIdx === idx) return;
+      saveWorkflowStructure(c, ancestorPath, (level) => moveItem(level, fromIdx, idx));
+    });
+
     const upBtn = document.createElement('button');
     upBtn.type = 'button'; upBtn.className = 'btn btn-small'; upBtn.textContent = '↑'; upBtn.title = 'Move up';
     upBtn.disabled = idx === 0;
-    upBtn.addEventListener('click', () => saveWorkflowStructure(c, ancestorPath, (level) => swapItems(level, idx, idx - 1)));
+    upBtn.addEventListener('click', () => saveWorkflowStructure(c, ancestorPath, (level) => moveItem(level, idx, idx - 1)));
 
     const downBtn = document.createElement('button');
     downBtn.type = 'button'; downBtn.className = 'btn btn-small'; downBtn.textContent = '↓'; downBtn.title = 'Move down';
     downBtn.disabled = idx === workflowLike.items.length - 1;
-    downBtn.addEventListener('click', () => saveWorkflowStructure(c, ancestorPath, (level) => swapItems(level, idx, idx + 1)));
+    downBtn.addEventListener('click', () => saveWorkflowStructure(c, ancestorPath, (level) => moveItem(level, idx, idx + 1)));
 
     const nameInput = document.createElement('input');
     nameInput.value = node.name; nameInput.style.flex = '1'; nameInput.style.minWidth = '100px';
@@ -1009,7 +1009,7 @@ function buildWorkflowLevelEditControls(c, workflowLike, ancestorPath) {
       header.appendChild(confirmRow);
     });
 
-    header.append(upBtn, downBtn, nameInput, subActionBtn, removeBtn);
+    header.append(dragHandle, upBtn, downBtn, nameInput, subActionBtn, removeBtn);
     row.appendChild(header);
     wrap.appendChild(row);
   });
