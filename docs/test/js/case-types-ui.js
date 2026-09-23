@@ -1,22 +1,27 @@
-import { db } from './firebase-init.js?v=0.5.0-t03';
+import { db } from './firebase-init.js?v=0.6.0-t01';
 import {
   doc, updateDoc, deleteDoc, collection, getDocs, addDoc
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { newTaskNode, newActionNode, emptyWorkflow, updateAtPath } from './workflow.js?v=0.5.0-t03';
-import { loadCatalog, getCachedActionDefs, getCachedTaskDefs, actionDefPath, nodeFromActionDef, nodeFromTaskDef } from './catalog-ui.js?v=0.5.0-t03';
+import { newTerminalNode, newContainerNode, newParameter, emptyWorkflow, updateAtPath } from './workflow.js?v=0.6.0-t01';
+import { loadCatalog, actionDefsForContext, actionDefPath, nodeFromActionDef } from './catalog-ui.js?v=0.6.0-t01';
 
 // ---------------------------------------------------------------------
-// Admin: case type CRUD, plus the 0.5.0 Workflow-template authoring
-// screen. A case type's `workflowTemplate` (replacing 0.4.1's
-// `labWorkflowTemplate`/`archivingWorkflowTemplate` split, and the
-// "Seed default workflow" checkbox that stood in for a real editor) is
-// what a new case's own Workflow gets deep-copied from at creation --
-// see cases.js/workflow.js. Phase 1 per TASK.md: plain top-to-bottom
-// add/remove/edit, no drag-reorder. 0.5.0-t03 added the reusable Action/Task
-// catalog (catalog-ui.js, the new admin Workflow tab) -- every level of
-// this editor now also offers "+ From catalog" alongside "+ Task"/
-// "+ Action", inserting a copy of a catalog definition (see
-// buildCatalogPicker below).
+// Admin: case type CRUD, plus the Workflow-template authoring screen. A
+// case type's `workflowTemplate` (replacing 0.4.1's
+// `labWorkflowTemplate`/`archivingWorkflowTemplate` split) is what a new
+// case's own Workflow gets deep-copied from at creation -- see
+// cases.js/workflow.js. Plain top-to-bottom add/remove/edit, no
+// drag-reorder (same phase-1 boundary as before).
+//
+// 0.6.0: Task retired -- everything is an Action, either terminal
+// ("+ Terminal") or a container that holds its own nested items
+// ("+ Container"). The "+ From catalog" picker is now context-filtered
+// (SPEC.md's hierarchy-scoping): at the template root it only offers
+// case-level (`parentId: null`) definitions; inside a container node's
+// own nested editor it only offers definitions parented under THAT
+// node's own `defId` (which catalog action, if any, it was copied from --
+// an ad hoc "+ Container" has no `defId`, so nothing in the catalog can
+// ever be placed inside it until it's replaced with a catalog pick).
 // ---------------------------------------------------------------------
 const addCaseTypeForm = document.getElementById('addCaseTypeForm');
 const addCaseTypeError = document.getElementById('addCaseTypeError');
@@ -44,9 +49,9 @@ export function findCaseTypeById(id) {
 }
 
 export async function renderCaseTypeList() {
-  // The catalog picker (buildCatalogPicker below) needs actionDefs/
-  // taskDefs loaded regardless of whether the admin has visited the
-  // Workflow tab yet this session.
+  // The catalog picker (buildCatalogPicker below) needs actionDefs loaded
+  // regardless of whether the admin has visited the Workflow tab yet this
+  // session.
   await Promise.all([loadCaseTypes(), loadCatalog()]);
   caseTypeListBody.innerHTML = '';
   if (caseTypes.length === 0) {
@@ -113,7 +118,7 @@ function buildWorkflowEditorRow(ct) {
   const td = document.createElement('td'); td.colSpan = 3;
   const container = document.createElement('div');
   container.id = 'wfEditor-' + ct.id;
-  container.appendChild(buildItemsEditor(ct, [], ct.workflowTemplate || emptyWorkflow()));
+  container.appendChild(buildItemsEditor(ct, [], ct.workflowTemplate || emptyWorkflow(), null));
   td.appendChild(container);
   tr.appendChild(td);
   return tr;
@@ -123,16 +128,19 @@ async function saveTemplate(ct, newWorkflow) {
   await updateDoc(doc(db, 'test_caseTypes', ct.id), { workflowTemplate: newWorkflow });
   ct.workflowTemplate = newWorkflow;
   const container = document.getElementById('wfEditor-' + ct.id);
-  if (container) container.replaceChildren(buildItemsEditor(ct, [], ct.workflowTemplate));
+  if (container) container.replaceChildren(buildItemsEditor(ct, [], ct.workflowTemplate, null));
 }
 
-// Recursive: renders one items[] level (the template root, or an action's
-// own nested items) with add-task/add-action controls plus each child's own
-// inline editor. `path` is the index path from the template root to THIS
-// items[] array. Read-modify-write-back-whole-field-then-rerender-just-
-// this-editor, same pattern as the rest of the app's structural editors
-// (archiving workflow, sample edit).
-function buildItemsEditor(ct, path, workflowLike) {
+// Recursive: renders one items[] level (the template root, or a
+// container's own nested items) with add-terminal/add-container controls
+// plus each child's own inline editor. `path` is the index path from the
+// template root to THIS items[] array; `contextDefId` is the catalog
+// definition id this level corresponds to (null at the template root =
+// case-level) -- used to filter the "+ From catalog" picker per SPEC's
+// hierarchy-scoping. Read-modify-write-back-whole-field-then-rerender-
+// just-this-editor, same pattern as the rest of the app's structural
+// editors (archiving workflow, sample edit).
+function buildItemsEditor(ct, path, workflowLike, contextDefId) {
   const wrap = document.createElement('div');
   wrap.className = 'workflow-editor-level';
 
@@ -142,38 +150,37 @@ function buildItemsEditor(ct, path, workflowLike) {
 
   const addRow = document.createElement('div');
   addRow.style.cssText = 'display:flex; gap:8px; margin-top:8px;';
-  const addTaskBtn = document.createElement('button');
-  addTaskBtn.type = 'button'; addTaskBtn.className = 'btn btn-small'; addTaskBtn.textContent = '+ Task';
-  addTaskBtn.addEventListener('click', () => addNode(ct, path, newTaskNode('New task')));
-  const addActionBtn = document.createElement('button');
-  addActionBtn.type = 'button'; addActionBtn.className = 'btn btn-small'; addActionBtn.textContent = '+ Action';
-  addActionBtn.addEventListener('click', () => addNode(ct, path, newActionNode('New action')));
-  addRow.append(addTaskBtn, addActionBtn);
+  const addTerminalBtn = document.createElement('button');
+  addTerminalBtn.type = 'button'; addTerminalBtn.className = 'btn btn-small'; addTerminalBtn.textContent = '+ Terminal';
+  addTerminalBtn.addEventListener('click', () => addNode(ct, path, newTerminalNode('New action')));
+  const addContainerBtn = document.createElement('button');
+  addContainerBtn.type = 'button'; addContainerBtn.className = 'btn btn-small'; addContainerBtn.textContent = '+ Container';
+  addContainerBtn.addEventListener('click', () => addNode(ct, path, newContainerNode('New action')));
+  addRow.append(addTerminalBtn, addContainerBtn);
   wrap.appendChild(addRow);
-  wrap.appendChild(buildCatalogPicker(ct, path));
+  wrap.appendChild(buildCatalogPicker(ct, path, contextDefId));
 
   return wrap;
 }
 
-// Picks an existing catalog Action/Task definition (see catalog-ui.js) and
-// inserts a fresh copy of it at this level -- picking an action brings its
-// whole catalog subtree along (nested action/task defs), since that's the
-// point of defining "Make sample" once under "Lab" rather than rebuilding
-// it inline in every case type.
-function buildCatalogPicker(ct, path) {
+// Picks an existing catalog action definition (see catalog-ui.js), scoped
+// to whatever's valid at this exact nesting context, and inserts a fresh
+// copy at this level -- picking a container brings its whole catalog
+// subtree along, since that's the point of defining "Make sample" once
+// under "Lab" rather than rebuilding it inline in every case type.
+function buildCatalogPicker(ct, path, contextDefId) {
+  const defs = actionDefsForContext(contextDefId);
   const row = document.createElement('div'); row.className = 'catalog-picker-row';
+  if (defs.length === 0) {
+    row.appendChild(Object.assign(document.createElement('span'), { className: 'muted', textContent: 'No catalog actions defined at this level yet.' }));
+    return row;
+  }
   const select = document.createElement('select');
   const blankOpt = document.createElement('option'); blankOpt.value = ''; blankOpt.textContent = '(pick from catalog)';
   select.appendChild(blankOpt);
-  getCachedActionDefs().forEach((a) => {
+  defs.forEach((a) => {
     const opt = document.createElement('option');
-    opt.value = `action:${a.id}`; opt.textContent = `Action: ${actionDefPath(a.id)}`;
-    select.appendChild(opt);
-  });
-  getCachedTaskDefs().forEach((t) => {
-    const opt = document.createElement('option');
-    opt.value = `task:${t.id}`;
-    opt.textContent = `Task: ${t.parentId ? actionDefPath(t.parentId) + ' > ' + t.name : t.name}`;
+    opt.value = a.id; opt.textContent = `${a.kind === 'container' ? 'Container' : 'Terminal'}: ${actionDefPath(a.id)}`;
     select.appendChild(opt);
   });
 
@@ -181,8 +188,7 @@ function buildCatalogPicker(ct, path) {
   insertBtn.type = 'button'; insertBtn.className = 'btn btn-small'; insertBtn.textContent = '+ From catalog';
   insertBtn.addEventListener('click', () => {
     if (!select.value) return;
-    const [kind, id] = select.value.split(':');
-    const node = kind === 'action' ? nodeFromActionDef(id) : nodeFromTaskDef(id);
+    const node = nodeFromActionDef(select.value);
     if (node) addNode(ct, path, node);
   });
 
@@ -216,7 +222,7 @@ function buildNodeEditor(ct, path, node) {
   header.style.cssText = 'display:flex; gap:8px; align-items:center;';
   const kindTag = document.createElement('span');
   kindTag.className = 'badge';
-  kindTag.textContent = node.kind === 'action' ? 'Action' : 'Task';
+  kindTag.textContent = node.kind === 'container' ? 'Container' : 'Terminal';
   const nameInput = document.createElement('input');
   nameInput.value = node.name;
   nameInput.style.flex = '1';
@@ -229,63 +235,97 @@ function buildNodeEditor(ct, path, node) {
   header.append(kindTag, nameInput, removeBtn);
   box.appendChild(header);
 
-  if (node.kind === 'task') {
-    box.appendChild(buildTaskTemplateFields(ct, path, node));
+  if (node.kind === 'terminal') {
+    box.appendChild(buildParameterFields(ct, path, node));
   } else {
     const nested = document.createElement('div');
     nested.className = 'workflow-node-nested';
-    nested.appendChild(buildItemsEditor(ct, path, node));
+    // A node's own `defId` (which catalog definition it was copied from,
+    // if any) is what scopes catalog picks inside IT -- an ad hoc
+    // container (defId null) has no matching catalog entries until it's
+    // replaced with a real catalog pick (see buildCatalogPicker).
+    nested.appendChild(buildItemsEditor(ct, path, node, node.defId || null));
     box.appendChild(nested);
   }
 
   return box;
 }
 
-function buildTaskTemplateFields(ct, path, task) {
+// Parameters -- terminal-only (SPEC.md's default: a container's "content"
+// is its nested workflow, not data entry of its own).
+function buildParameterFields(ct, path, action) {
   const wrap = document.createElement('div'); wrap.className = 'workflow-task-fields';
 
-  const verifiableLabel = document.createElement('label'); verifiableLabel.className = 'checkbox-inline';
-  const verifiableInput = document.createElement('input'); verifiableInput.type = 'checkbox'; verifiableInput.checked = !!task.isVerifiable;
-  verifiableInput.addEventListener('change', () => mutateNode(ct, path, (n) => ({ ...n, isVerifiable: verifiableInput.checked })));
-  verifiableLabel.append(verifiableInput, ' Requires verification');
-  wrap.appendChild(verifiableLabel);
+  const paramsLabel = document.createElement('label'); paramsLabel.textContent = 'Parameters';
+  wrap.appendChild(paramsLabel);
+  (action.parameters || []).forEach((p, pIdx) => wrap.appendChild(buildParameterRow(ct, path, action, pIdx)));
 
-  const valuesLabel = document.createElement('label'); valuesLabel.textContent = 'Value fields';
-  wrap.appendChild(valuesLabel);
-  (task.values || []).forEach((v, vIdx) => wrap.appendChild(buildValueTemplateRow(ct, path, task, vIdx)));
-
-  const addValueBtn = document.createElement('button');
-  addValueBtn.type = 'button'; addValueBtn.className = 'btn btn-small'; addValueBtn.textContent = '+ Value field';
-  addValueBtn.addEventListener('click', () => mutateNode(ct, path, (n) => ({ ...n, values: [...(n.values || []), { name: 'New field', mode: 'fixed' }] })));
-  wrap.appendChild(addValueBtn);
+  const addParamBtn = document.createElement('button');
+  addParamBtn.type = 'button'; addParamBtn.className = 'btn btn-small'; addParamBtn.textContent = '+ Parameter';
+  addParamBtn.addEventListener('click', () => mutateNode(ct, path, (n) => ({
+    ...n, parameters: [...(n.parameters || []), newParameter('New field', 'value')]
+  })));
+  wrap.appendChild(addParamBtn);
 
   return wrap;
 }
 
-function buildValueTemplateRow(ct, path, task, vIdx) {
-  const row = document.createElement('div'); row.className = 'value-row';
-  const v = task.values[vIdx];
-  const nameInput = document.createElement('input'); nameInput.value = v.name; nameInput.placeholder = 'Field name (e.g. temperature)';
+function buildParameterRow(ct, path, action, pIdx) {
+  const p = action.parameters[pIdx];
+  const wrap = document.createElement('div');
+
+  const row = document.createElement('div'); row.className = 'value-row'; row.style.flexWrap = 'wrap';
+  const nameInput = document.createElement('input'); nameInput.value = p.name; nameInput.placeholder = 'Parameter name';
   const modeSelect = document.createElement('select');
-  [['fixed', 'Fixed'], ['duplicable', 'Duplicable']].forEach(([val, lbl]) => {
+  [['list', 'Choose from list'], ['value', 'Free value']].forEach(([val, lbl]) => {
     const opt = document.createElement('option'); opt.value = val; opt.textContent = lbl;
-    if (val === v.mode) opt.selected = true;
+    if (val === p.mode) opt.selected = true;
     modeSelect.appendChild(opt);
   });
   const rmBtn = document.createElement('button'); rmBtn.type = 'button'; rmBtn.className = 'btn btn-small'; rmBtn.textContent = '✕';
+  rmBtn.addEventListener('click', () => mutateNode(ct, path, (n) => ({ ...n, parameters: n.parameters.filter((_, i) => i !== pIdx) })));
 
   function save() {
     mutateNode(ct, path, (n) => ({
       ...n,
-      values: n.values.map((val, i) => (i === vIdx ? { name: nameInput.value.trim() || val.name, mode: modeSelect.value } : val))
+      parameters: n.parameters.map((val, i) => (i === pIdx ? { ...val, name: nameInput.value.trim() || val.name, mode: modeSelect.value } : val))
     }));
   }
   nameInput.addEventListener('change', save);
   modeSelect.addEventListener('change', save);
-  rmBtn.addEventListener('click', () => mutateNode(ct, path, (n) => ({ ...n, values: n.values.filter((_, i) => i !== vIdx) })));
-
   row.append(nameInput, modeSelect, rmBtn);
-  return row;
+  wrap.appendChild(row);
+
+  if (p.mode === 'list') {
+    const optionsWrap = document.createElement('div'); optionsWrap.style.cssText = 'margin:4px 0 8px 12px;';
+    (p.options || []).forEach((optVal, oIdx) => {
+      const optRow = document.createElement('div'); optRow.className = 'value-row';
+      const optInput = document.createElement('input'); optInput.value = optVal; optInput.placeholder = 'Option value';
+      optInput.addEventListener('change', () => mutateNode(ct, path, (n) => ({
+        ...n,
+        parameters: n.parameters.map((val, i) => (i === pIdx
+          ? { ...val, options: val.options.map((o, oi) => (oi === oIdx ? optInput.value.trim() : o)) }
+          : val))
+      })));
+      const optRm = document.createElement('button'); optRm.type = 'button'; optRm.className = 'btn btn-small'; optRm.textContent = '✕';
+      optRm.addEventListener('click', () => mutateNode(ct, path, (n) => ({
+        ...n,
+        parameters: n.parameters.map((val, i) => (i === pIdx ? { ...val, options: val.options.filter((_, oi) => oi !== oIdx) } : val))
+      })));
+      optRow.append(optInput, optRm);
+      optionsWrap.appendChild(optRow);
+    });
+    const addOptBtn = document.createElement('button');
+    addOptBtn.type = 'button'; addOptBtn.className = 'btn btn-small'; addOptBtn.textContent = '+ Option';
+    addOptBtn.addEventListener('click', () => mutateNode(ct, path, (n) => ({
+      ...n,
+      parameters: n.parameters.map((val, i) => (i === pIdx ? { ...val, options: [...(val.options || []), 'New option'] } : val))
+    })));
+    optionsWrap.appendChild(addOptBtn);
+    wrap.appendChild(optionsWrap);
+  }
+
+  return wrap;
 }
 
 addCaseTypeForm.addEventListener('submit', async (e) => {

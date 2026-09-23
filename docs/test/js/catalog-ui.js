@@ -1,60 +1,52 @@
-import { db } from './firebase-init.js?v=0.5.0-t03';
+import { db } from './firebase-init.js?v=0.6.0-t01';
 import {
   collection, doc, getDocs, addDoc, deleteDoc
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { newTaskNode, newActionNode } from './workflow.js?v=0.5.0-t03';
+import { newTerminalNode, newContainerNode } from './workflow.js?v=0.6.0-t01';
 
 // ---------------------------------------------------------------------
-// Admin: reusable Action/Task catalog (0.5.0-t03), at the user's request --
-// named definitions ("action definitions" in `test_actionDefs`, "task
-// definitions" in `test_taskDefs`) admin builds once and can insert
-// wherever needed while authoring a case type's Workflow template
-// (case-types-ui.js's "+ From catalog"), instead of freehand-authoring
-// every action/task from scratch each time.
+// Admin: reusable Action catalog (0.6.0 -- retired the separate `taskDefs`
+// collection from 0.5.0-t02; Task folded into Action as the terminal
+// kind). A definition is `{name, kind:'terminal'|'container', parentId,
+// parameters}` in `test_actionDefs` -- `parentId` is now **hierarchy-
+// scoped and load-bearing** (SPEC.md), not just organizational: a
+// definition with no parent is case-level (only usable in a case's own
+// top-level workflow); one parented under another action definition is
+// only usable inside THAT specific action's own nested workflow. Only a
+// container-kind definition is a valid parent (a terminal action can't
+// hold children) -- enforced in the "parent action" picker below.
 //
-// An action definition is just {name, parentId} -- parentId points at
-// another action definition (or null for top-level), building the
-// catalog's own hierarchy directly (e.g. "Make sample" parented under
-// "Lab"), the same flat-collection-with-a-parentId-pointer pattern
-// already used for case Notes. A task definition adds {isVerifiable,
-// values:[{name, mode}]} -- the same authoring-time fields a Task node
-// carries in workflow.js, minus every runtime-only field (executedBy,
-// etc.), since a catalog entry is a pure template, never executed itself.
-//
-// Inserting a definition into a case type's Workflow is copy-at-use, not
-// a live reference (see nodeFromActionDef/nodeFromTaskDef below) -- same
-// "snapshot, not a pointer" semantics already used for case type ->
-// case's own Workflow, and item/sample -> a task's live zone tagging.
-// Editing a catalog definition later never retroactively changes a
-// Workflow it was already copied into.
+// Inserting a definition into a workflow (case-types-ui.js / cases.js's
+// "+ From catalog") is copy-at-use, not a live reference -- see
+// nodeFromActionDef below -- and must filter to only the definitions
+// whose parentId matches the CURRENT editing context (see
+// actionDefsForContext), enforcing the hierarchy-scoping as a real
+// placement rule, not just a suggestion.
 // ---------------------------------------------------------------------
 
 const TRASH_ICON_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6M14 11v6"></path><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path></svg>`;
 
 const actionDefAddContainer = document.getElementById('actionDefAddContainer');
 const actionDefListBody = document.getElementById('actionDefListBody');
-const taskDefAddContainer = document.getElementById('taskDefAddContainer');
-const taskDefListBody = document.getElementById('taskDefListBody');
 
 let actionDefs = [];
-let taskDefs = [];
 
 export async function loadCatalog() {
-  const [aSnap, tSnap] = await Promise.all([
-    getDocs(collection(db, 'test_actionDefs')),
-    getDocs(collection(db, 'test_taskDefs'))
-  ]);
+  const snap = await getDocs(collection(db, 'test_actionDefs'));
   actionDefs = [];
-  aSnap.forEach((d) => actionDefs.push({ id: d.id, ...d.data() }));
-  taskDefs = [];
-  tSnap.forEach((d) => taskDefs.push({ id: d.id, ...d.data() }));
+  snap.forEach((d) => actionDefs.push({ id: d.id, ...d.data() }));
   actionDefs.sort((a, b) => a.name.localeCompare(b.name));
-  taskDefs.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export function getCachedActionDefs() { return actionDefs; }
-export function getCachedTaskDefs() { return taskDefs; }
 export function findActionDefById(id) { return actionDefs.find((a) => a.id === id) || null; }
+
+// The definitions valid for insertion at a given editing context --
+// `contextDefId` is null for a case-level workflow root, or the defId of
+// whichever container node is currently being edited/navigated into.
+export function actionDefsForContext(contextDefId) {
+  return actionDefs.filter((a) => a.parentId === contextDefId);
+}
 
 // "Lab > Make sample" breadcrumb, so nesting reads clearly in a flat
 // dropdown without needing a full tree-picker widget.
@@ -64,46 +56,41 @@ export function actionDefPath(id) {
   return def.parentId ? `${actionDefPath(def.parentId)} > ${def.name}` : def.name;
 }
 
-// Builds a fresh Node -- brand-new runtime id, empty execution state --
-// from a catalog action definition, including every descendant (nested
-// action/task defs whose parentId chain leads back to it). See the
-// module comment above for why this copies rather than references.
+// Builds a fresh Action node -- brand-new runtime id, empty live state --
+// from a catalog definition. For a container definition, every descendant
+// (nested action defs whose parentId chain leads back to it, any kind) is
+// copied in recursively too, since picking a container should bring its
+// whole nested structure along. See the module comment above for why this
+// copies rather than references.
 export function nodeFromActionDef(defId) {
   const def = findActionDefById(defId);
   if (!def) return null;
-  const node = newActionNode(def.name);
-  node.items = [
-    ...actionDefs.filter((a) => a.parentId === defId).map((a) => nodeFromActionDef(a.id)),
-    ...taskDefs.filter((t) => t.parentId === defId).map((t) => nodeFromTaskDef(t.id))
-  ];
-  return node;
-}
-
-export function nodeFromTaskDef(defId) {
-  const def = taskDefs.find((t) => t.id === defId);
-  if (!def) return null;
-  const node = newTaskNode(def.name);
-  node.values = (def.values || []).map((v) => ({ ...v }));
-  node.isVerifiable = !!def.isVerifiable;
-  return node;
+  if (def.kind === 'container') {
+    const node = newContainerNode(def.name, def.id);
+    node.items = actionDefsForContext(defId).map((a) => nodeFromActionDef(a.id));
+    return node;
+  }
+  return newTerminalNode(def.name, (def.parameters || []).map((p) => ({ ...p })), def.id);
 }
 
 export async function renderCatalog() {
   await loadCatalog();
   renderActionDefAdd();
   renderActionDefList();
-  renderTaskDefAdd();
-  renderTaskDefList();
 }
 
 // ---------------------------------------------------------------------
-// Actions
+// Add form
 // ---------------------------------------------------------------------
 function buildParentActionSelect() {
   const select = document.createElement('select');
-  const noneOpt = document.createElement('option'); noneOpt.value = ''; noneOpt.textContent = '(top level)';
+  const noneOpt = document.createElement('option'); noneOpt.value = ''; noneOpt.textContent = '(case level)';
   select.appendChild(noneOpt);
-  actionDefs.forEach((a) => {
+  // Only a container-kind definition is a valid parent -- a terminal
+  // action can't hold children, so it's excluded here rather than just
+  // discouraged (TASK.md: "make an invalid placement impossible to pick
+  // in the UI, not just discouraged").
+  actionDefs.filter((a) => a.kind === 'container').forEach((a) => {
     const opt = document.createElement('option'); opt.value = a.id; opt.textContent = actionDefPath(a.id);
     select.appendChild(opt);
   });
@@ -112,22 +99,95 @@ function buildParentActionSelect() {
 
 function renderActionDefAdd() {
   actionDefAddContainer.innerHTML = '';
-  const row = document.createElement('div'); row.className = 'add-row';
 
+  const row = document.createElement('div'); row.className = 'add-row';
   const nameField = document.createElement('div'); nameField.className = 'field';
   const nameLabel = document.createElement('label'); nameLabel.textContent = 'Name';
   const nameInput = document.createElement('input');
   nameField.append(nameLabel, nameInput);
 
+  const kindField = document.createElement('div'); kindField.className = 'field';
+  const kindLabel = document.createElement('label'); kindLabel.textContent = 'Kind';
+  const kindSelect = document.createElement('select');
+  [['terminal', 'Terminal (a single done/not-done step)'], ['container', 'Container (holds its own nested actions)']].forEach(([val, lbl]) => {
+    const opt = document.createElement('option'); opt.value = val; opt.textContent = lbl;
+    kindSelect.appendChild(opt);
+  });
+  kindField.append(kindLabel, kindSelect);
+
   const parentField = document.createElement('div'); parentField.className = 'field';
-  const parentLabel = document.createElement('label'); parentLabel.textContent = 'Parent action';
+  const parentLabel = document.createElement('label'); parentLabel.textContent = 'Upper level';
   const parentSelect = buildParentActionSelect();
   parentField.append(parentLabel, parentSelect);
 
+  row.append(nameField, kindField, parentField);
+  actionDefAddContainer.appendChild(row);
+
+  // Parameters -- terminal-only (SPEC.md's default assumption, logged in
+  // HANDOFF.md: a container's "content" is its nested workflow, not data
+  // entry of its own).
+  const paramsWrap = document.createElement('div');
+  actionDefAddContainer.appendChild(paramsWrap);
+  const paramEntries = []; // { nameInput, modeSelect, optionInputs:[] }
+
+  function renderParamsSection() {
+    paramsWrap.innerHTML = '';
+    if (kindSelect.value !== 'terminal') return;
+    const label = document.createElement('label'); label.textContent = 'Parameters';
+    paramsWrap.appendChild(label);
+    const rows = document.createElement('div');
+    paramsWrap.appendChild(rows);
+    paramEntries.length = 0;
+
+    function addParamRow() {
+      const prow = document.createElement('div'); prow.className = 'value-row'; prow.style.flexWrap = 'wrap';
+      const pName = document.createElement('input'); pName.placeholder = 'Parameter name';
+      const pMode = document.createElement('select');
+      [['list', 'Choose from list'], ['value', 'Free value']].forEach(([val, lbl]) => {
+        const opt = document.createElement('option'); opt.value = val; opt.textContent = lbl;
+        pMode.appendChild(opt);
+      });
+      const rm = document.createElement('button'); rm.type = 'button'; rm.className = 'btn btn-small'; rm.textContent = '✕';
+      const entry = { nameInput: pName, modeSelect: pMode, optionInputs: [] };
+      rm.addEventListener('click', () => { prow.remove(); optionsRow.remove(); paramEntries.splice(paramEntries.indexOf(entry), 1); });
+      prow.append(pName, pMode, rm);
+      rows.appendChild(prow);
+
+      const optionsRow = document.createElement('div');
+      optionsRow.style.cssText = 'margin:4px 0 8px 12px;';
+      rows.appendChild(optionsRow);
+      function refreshOptionsVisibility() {
+        optionsRow.classList.toggle('hidden', pMode.value !== 'list');
+      }
+      function addOptionInput() {
+        const optRow = document.createElement('div'); optRow.className = 'value-row';
+        const optInput = document.createElement('input'); optInput.placeholder = 'Option value';
+        const optRm = document.createElement('button'); optRm.type = 'button'; optRm.className = 'btn btn-small'; optRm.textContent = '✕';
+        optRm.addEventListener('click', () => { optRow.remove(); entry.optionInputs.splice(entry.optionInputs.indexOf(optInput), 1); });
+        optRow.append(optInput, optRm);
+        optionsRow.appendChild(optRow);
+        entry.optionInputs.push(optInput);
+      }
+      const addOptBtn = document.createElement('button');
+      addOptBtn.type = 'button'; addOptBtn.className = 'btn btn-small'; addOptBtn.textContent = '+ Option';
+      addOptBtn.addEventListener('click', addOptionInput);
+      optionsRow.appendChild(addOptBtn);
+      pMode.addEventListener('change', refreshOptionsVisibility);
+      refreshOptionsVisibility();
+
+      paramEntries.push(entry);
+    }
+    const addParamBtn = document.createElement('button');
+    addParamBtn.type = 'button'; addParamBtn.className = 'btn btn-small'; addParamBtn.textContent = '+ Parameter';
+    addParamBtn.addEventListener('click', addParamRow);
+    paramsWrap.appendChild(addParamBtn);
+  }
+  kindSelect.addEventListener('change', renderParamsSection);
+  renderParamsSection();
+
   const addBtn = document.createElement('button');
   addBtn.type = 'button'; addBtn.className = 'btn btn-primary'; addBtn.textContent = 'Add action';
-  row.append(nameField, parentField, addBtn);
-
+  addBtn.style.cssText = 'margin-top:10px; display:block;';
   const err = document.createElement('div'); err.className = 'error';
 
   addBtn.addEventListener('click', async () => {
@@ -135,7 +195,19 @@ function renderActionDefAdd() {
     if (!name) { err.textContent = 'Name is required.'; return; }
     addBtn.disabled = true;
     try {
-      await addDoc(collection(db, 'test_actionDefs'), { name, parentId: parentSelect.value || null });
+      const parameters = kindSelect.value === 'terminal'
+        ? paramEntries
+          .filter((e) => e.nameInput.value.trim())
+          .map((e) => ({
+            id: (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2)),
+            name: e.nameInput.value.trim(),
+            mode: e.modeSelect.value,
+            options: e.modeSelect.value === 'list' ? e.optionInputs.map((i) => i.value.trim()).filter(Boolean) : []
+          }))
+        : [];
+      await addDoc(collection(db, 'test_actionDefs'), {
+        name, kind: kindSelect.value, parentId: parentSelect.value || null, parameters
+      });
       await renderCatalog();
     } catch (ex) {
       err.textContent = `Couldn't add action: ${ex.message}`;
@@ -143,9 +215,12 @@ function renderActionDefAdd() {
     }
   });
 
-  actionDefAddContainer.append(row, err);
+  actionDefAddContainer.append(addBtn, err);
 }
 
+// ---------------------------------------------------------------------
+// List
+// ---------------------------------------------------------------------
 function renderActionDefList() {
   actionDefListBody.innerHTML = '';
   if (actionDefs.length === 0) {
@@ -156,128 +231,28 @@ function renderActionDefList() {
 }
 
 // Same flat-with-parentId-built-into-a-tree-client-side approach as case
-// Notes -- each action def row recurses into its own children (nested
-// action defs and any task defs parented under it), indented by depth.
+// Notes -- each row recurses into its own children (other action defs
+// whose parentId points back to it), indented by depth.
 function buildActionDefRow(def, depth) {
   const wrap = document.createElement('div');
   const row = document.createElement('div'); row.className = 'action-row';
   row.style.paddingLeft = `${depth * 20}px`;
-  const label = document.createElement('span'); label.textContent = def.name;
+  const label = document.createElement('span');
+  label.textContent = def.name + ` (${def.kind}` + (def.parameters && def.parameters.length ? `, ${def.parameters.length} param${def.parameters.length > 1 ? 's' : ''}` : '') + ')';
   row.appendChild(label);
   row.appendChild(buildDeleteControl(
-    'Delete this action and everything nested under it?',
+    def.kind === 'container' ? `Delete "${def.name}" and everything nested under it?` : `Delete "${def.name}"?`,
     () => deleteActionDefCascade(def.id)
   ));
   wrap.appendChild(row);
 
-  const childActions = actionDefs.filter((a) => a.parentId === def.id);
-  const childTasks = taskDefs.filter((t) => t.parentId === def.id);
-  childActions.forEach((a) => wrap.appendChild(buildActionDefRow(a, depth + 1)));
-  childTasks.forEach((t) => wrap.appendChild(buildTaskDefRow(t, depth + 1)));
-
+  actionDefsForContext(def.id).forEach((child) => wrap.appendChild(buildActionDefRow(child, depth + 1)));
   return wrap;
 }
 
 async function deleteActionDefCascade(id) {
-  for (const a of actionDefs.filter((x) => x.parentId === id)) await deleteActionDefCascade(a.id);
-  for (const t of taskDefs.filter((x) => x.parentId === id)) await deleteDoc(doc(db, 'test_taskDefs', t.id));
+  for (const a of actionDefsForContext(id)) await deleteActionDefCascade(a.id);
   await deleteDoc(doc(db, 'test_actionDefs', id));
-}
-
-// ---------------------------------------------------------------------
-// Tasks
-// ---------------------------------------------------------------------
-function renderTaskDefAdd() {
-  taskDefAddContainer.innerHTML = '';
-
-  const row = document.createElement('div'); row.className = 'add-row';
-  const nameField = document.createElement('div'); nameField.className = 'field';
-  const nameLabel = document.createElement('label'); nameLabel.textContent = 'Name';
-  const nameInput = document.createElement('input');
-  nameField.append(nameLabel, nameInput);
-
-  const parentField = document.createElement('div'); parentField.className = 'field';
-  const parentLabel = document.createElement('label'); parentLabel.textContent = 'Parent action';
-  const parentSelect = buildParentActionSelect();
-  parentField.append(parentLabel, parentSelect);
-  row.append(nameField, parentField);
-  taskDefAddContainer.appendChild(row);
-
-  const verifiableLabel = document.createElement('label'); verifiableLabel.className = 'checkbox-inline';
-  verifiableLabel.style.margin = '10px 0';
-  const verifiableInput = document.createElement('input'); verifiableInput.type = 'checkbox';
-  verifiableLabel.append(verifiableInput, ' Requires verification');
-  taskDefAddContainer.appendChild(verifiableLabel);
-
-  const valuesLabel = document.createElement('label'); valuesLabel.textContent = 'Value fields';
-  taskDefAddContainer.appendChild(valuesLabel);
-  const valueRows = document.createElement('div');
-  taskDefAddContainer.appendChild(valueRows);
-  const valueEntries = [];
-  function addValueRow() {
-    const r = document.createElement('div'); r.className = 'value-row';
-    const vName = document.createElement('input'); vName.placeholder = 'Field name (e.g. temperature)';
-    const vMode = document.createElement('select');
-    [['fixed', 'Fixed'], ['duplicable', 'Duplicable']].forEach(([val, lbl]) => {
-      const opt = document.createElement('option'); opt.value = val; opt.textContent = lbl;
-      vMode.appendChild(opt);
-    });
-    const rm = document.createElement('button'); rm.type = 'button'; rm.className = 'btn btn-small'; rm.textContent = '✕';
-    const entry = { nameInput: vName, modeSelect: vMode };
-    rm.addEventListener('click', () => { r.remove(); valueEntries.splice(valueEntries.indexOf(entry), 1); });
-    r.append(vName, vMode, rm);
-    valueRows.appendChild(r);
-    valueEntries.push(entry);
-  }
-  const addValueBtn = document.createElement('button');
-  addValueBtn.type = 'button'; addValueBtn.className = 'btn btn-small'; addValueBtn.textContent = '+ Value field';
-  addValueBtn.addEventListener('click', addValueRow);
-  taskDefAddContainer.appendChild(addValueBtn);
-
-  const addBtn = document.createElement('button');
-  addBtn.type = 'button'; addBtn.className = 'btn btn-primary'; addBtn.textContent = 'Add task';
-  addBtn.style.cssText = 'margin-top:10px; display:block;';
-  const err = document.createElement('div'); err.className = 'error';
-
-  addBtn.addEventListener('click', async () => {
-    const name = nameInput.value.trim();
-    if (!name) { err.textContent = 'Name is required.'; return; }
-    addBtn.disabled = true;
-    try {
-      const values = valueEntries
-        .map((e) => ({ name: e.nameInput.value.trim(), mode: e.modeSelect.value }))
-        .filter((v) => v.name);
-      await addDoc(collection(db, 'test_taskDefs'), {
-        name, parentId: parentSelect.value || null, isVerifiable: verifiableInput.checked, values
-      });
-      await renderCatalog();
-    } catch (ex) {
-      err.textContent = `Couldn't add task: ${ex.message}`;
-      addBtn.disabled = false;
-    }
-  });
-
-  taskDefAddContainer.append(addBtn, err);
-}
-
-function renderTaskDefList() {
-  taskDefListBody.innerHTML = '';
-  const topLevel = taskDefs.filter((t) => !t.parentId);
-  if (topLevel.length === 0) {
-    taskDefListBody.innerHTML = '<p class="muted">No top-level tasks -- tasks nested under an action show in the Actions list above.</p>';
-    return;
-  }
-  topLevel.forEach((t) => taskDefListBody.appendChild(buildTaskDefRow(t, 0)));
-}
-
-function buildTaskDefRow(def, depth) {
-  const row = document.createElement('div'); row.className = 'action-row';
-  row.style.paddingLeft = `${depth * 20}px`;
-  const label = document.createElement('span');
-  label.textContent = def.name + (def.isVerifiable ? ' (verifiable)' : '');
-  row.appendChild(label);
-  row.appendChild(buildDeleteControl('Delete this task?', () => deleteDoc(doc(db, 'test_taskDefs', def.id))));
-  return row;
 }
 
 // Shared inline confirm-then-delete control, same pattern used throughout

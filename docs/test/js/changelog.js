@@ -1,4 +1,4 @@
-import { APP_VERSION } from './firebase-init.js?v=0.5.0-t03';
+import { APP_VERSION } from './firebase-init.js?v=0.6.0-t01';
 
 // Plain-language, user-facing history -- distinct from SPEC.md's Decisions
 // Log (design/build rationale) and HANDOFF.md (Claude Code's build notes).
@@ -43,15 +43,16 @@ const CHANGELOG = [
     ]
   },
   {
-    version: '0.5.0',
+    version: '0.6.0',
     date: '2026-09-23',
     notes: [
       'Case workflow rebuilt: the fixed New/Lab/Write/Archive/Done stages are gone -- a case now follows whatever steps its case type\'s workflow was set up with, named however admin named them.',
-      'Samples no longer carry their own tests -- a step in the workflow gets tagged with whichever sample(s)/zone(s) it applies to, right when you work on it.',
-      'A step can ask for readings (a fixed field, or one you can add more copies of live), can require a second person to independently verify it, and can always be marked complete by hand.',
+      'A workflow step is either a single done/not-done action, or a container holding its own nested steps.',
+      'A step can ask for parameters (choose from a list, or a free value) -- tag which sample(s)/zone(s) it applies to, then fill in values for each, with a "set for all, override individually" shortcut.',
+      'The moment a step is done, the workflow moves on to the next one automatically.',
       'Long-press (or right-click) any step in the workflow to jump straight to it, skipping the normal order, with a confirmation first.',
       'Admin can now build a case type\'s whole workflow from scratch -- add steps, nest steps inside a step, and set what each step asks for.',
-      'New admin tab: Workflow. Define reusable named actions and tasks (with a parent action, e.g. "Make sample" under "Lab") once, then insert them straight into any case type\'s workflow instead of rebuilding them from scratch every time.',
+      'New admin tab: Workflow. Define reusable named actions once (with an upper level, e.g. "Make sample" under "Lab") and insert them straight into any case type\'s workflow instead of rebuilding them from scratch every time.',
       'Case view: a case\'s own Workflow can now be edited in place (new Edit icon next to "Workflow") -- add or remove steps, rename one, or insert one from the catalog, without waiting on the case type\'s template.'
     ]
   }

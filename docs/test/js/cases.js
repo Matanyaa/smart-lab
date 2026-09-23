@@ -1,19 +1,19 @@
-import { db } from './firebase-init.js?v=0.5.0-t03';
+import { db } from './firebase-init.js?v=0.6.0-t01';
 import {
   collection, doc, getDoc, getDocs, addDoc, updateDoc, deleteDoc, query, where, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { loadCaseTypes, getCachedCaseTypes, findCaseTypeById } from './case-types-ui.js?v=0.5.0-t03';
+import { loadCaseTypes, getCachedCaseTypes, findCaseTypeById } from './case-types-ui.js?v=0.6.0-t01';
 import {
   loadClientOrgsAndClients, getCachedClientOrgs, getCachedClientsForOrg, fetchClientsForOrg,
   findClientById, findClientOrgById
-} from './clients-ui.js?v=0.5.0-t03';
+} from './clients-ui.js?v=0.6.0-t01';
 import {
-  emptyWorkflow, seedWorkflow, isTaskDone, currentPathOf, updateAtPath, recomputeAdvancement,
-  newTaskNode, newActionNode
-} from './workflow.js?v=0.5.0-t03';
+  emptyWorkflow, seedWorkflow, currentPathOf, nodeAtPath, updateAtPath, recomputeAdvancement,
+  newTerminalNode, newContainerNode
+} from './workflow.js?v=0.6.0-t01';
 import {
-  loadCatalog, getCachedActionDefs, getCachedTaskDefs, actionDefPath, nodeFromActionDef, nodeFromTaskDef
-} from './catalog-ui.js?v=0.5.0-t03';
+  loadCatalog, actionDefsForContext, actionDefPath, nodeFromActionDef
+} from './catalog-ui.js?v=0.6.0-t01';
 
 // ---------------------------------------------------------------------
 // Core case/sample/workflow model. Internal to the lab team -- admin has
@@ -760,13 +760,13 @@ function buildWorkflowSection(c, samples) {
   h3.textContent = 'Workflow';
   section.appendChild(h3);
 
-  // Edit mode (2026-09-23, at the user's request): lets whoever can edit
-  // the case's own info fields (team_leader or this case's caseManager --
-  // same gate as editInfoBtn, a notch above "any case staff can execute
-  // tasks") restructure the case's own Workflow in place -- add/remove
-  // items at any level, insert from the catalog -- instead of it being
-  // frozen at whatever the case type's template had at creation. Same
-  // toggle-icon pattern as editInfoBtn.
+  // Edit mode: lets whoever can edit the case's own info fields
+  // (team_leader or this case's caseManager -- same gate as editInfoBtn,
+  // a notch above "any case staff can mark an action done") restructure
+  // the case's own Workflow in place -- add/remove items at any level,
+  // insert from the catalog -- instead of it being frozen at whatever the
+  // case type's template had at creation. Same toggle-icon pattern as
+  // editInfoBtn.
   const editAllowed = canUpdateCase(c);
   if (editAllowed) {
     const editBtn = document.createElement('button');
@@ -794,10 +794,10 @@ function buildWorkflowSection(c, samples) {
 }
 
 // An items[]-bearing level with nothing in it yet -- either a genuinely
-// empty top-level Workflow (case type had no template) or an Action node
-// with no children yet. No circles to show (buildWorkflowLevel assumes at
-// least one item), so this is its own small branch: an add-controls panel
-// in edit mode, a plain note otherwise.
+// empty top-level Workflow (case type had no template) or a container
+// Action with no children yet. No circles to show (buildWorkflowLevel
+// assumes at least one item), so this is its own small branch: an
+// add-controls panel in edit mode, a plain note otherwise.
 function buildEmptyWorkflowLevel(c, workflowLike, ancestorPath, emptyLabel) {
   const wrap = document.createElement('div');
   if (workflowEditMode && canUpdateCase(c)) {
@@ -809,14 +809,15 @@ function buildEmptyWorkflowLevel(c, workflowLike, ancestorPath, emptyLabel) {
 }
 
 // One items[]-bearing level (the case's own top-level Workflow, or any
-// nested Action's own items) -- a circle strip (reusing the same
-// stage-flow visual device 0.4.1 built for the fixed 5-stage case, now
-// applied at every nesting depth) plus whichever child is being viewed
-// below it. `ancestorLive` threads down whether every ancestor level was
-// ALSO pointing at its own real current item -- a Task's controls only go
-// live when the *entire* path from the root matches the workflow's real
-// current path, otherwise it's a read-only preview (0.4.1's
-// read-only-elsewhere rule, generalized to arbitrary depth).
+// nested container Action's own items) -- a circle strip (reusing the
+// same stage-flow visual device 0.4.1 built for the fixed 5-stage case,
+// now applied at every nesting depth) plus whichever child is being
+// viewed below it. `ancestorLive` threads down whether every ancestor
+// level was ALSO pointing at its own real current item -- a terminal
+// action's controls only go live when the *entire* path from the root
+// matches the workflow's real current path, otherwise it's a read-only
+// preview (0.4.1's read-only-elsewhere rule, generalized to arbitrary
+// depth).
 function buildWorkflowLevel(c, workflowLike, ancestorPath, samples, ancestorLive) {
   const wrap = document.createElement('div');
   wrap.className = 'workflow-level';
@@ -854,25 +855,38 @@ function buildWorkflowLevel(c, workflowLike, ancestorPath, samples, ancestorLive
   const viewedNode = workflowLike.items[viewedIdx];
   const isLiveHere = ancestorLive && viewedIdx === realCurrentIdx;
 
-  if (viewedNode.kind === 'action') {
+  if (viewedNode.kind === 'container') {
     if (!viewedNode.items || viewedNode.items.length === 0) {
       wrap.appendChild(buildEmptyWorkflowLevel(c, viewedNode, [...ancestorPath, viewedIdx], `${viewedNode.name}: no steps yet.`));
     } else {
       wrap.appendChild(buildWorkflowLevel(c, viewedNode, [...ancestorPath, viewedIdx], samples, isLiveHere));
     }
   } else {
-    wrap.appendChild(buildTaskPanel(c, viewedNode, [...ancestorPath, viewedIdx], samples, isLiveHere));
+    wrap.appendChild(buildTerminalActionPanel(c, viewedNode, [...ancestorPath, viewedIdx], samples, isLiveHere));
   }
 
   return wrap;
 }
 
+// The catalog definition (if any) that scopes what's insertable AT this
+// exact editing context -- null for the case's own top-level workflow
+// (= case-level, per SPEC's hierarchy-scoping), or the defId of whichever
+// container node ancestorPath points at otherwise. An ad hoc container
+// (never picked from the catalog) has no defId, so nothing in the catalog
+// can ever be placed inside it -- see catalog-ui.js's actionDefsForContext.
+function contextDefIdFor(c, ancestorPath) {
+  if (ancestorPath.length === 0) return null;
+  const node = nodeAtPath(c.workflow, ancestorPath);
+  return node ? (node.defId || null) : null;
+}
+
 // Structural editing for one items[]-bearing level of a LIVE case's own
-// Workflow -- add a blank Task/Action, insert a copy from the catalog
-// (same "+ From catalog" picker as the case-type template editor, see
-// catalog-ui.js), or rename/remove an existing item. Every change writes
-// the whole `workflow` field back (via saveWorkflowStructure) and
-// re-renders, same read-modify-write pattern used throughout this app.
+// Workflow -- add a blank terminal/container action, insert a copy from
+// the catalog (context-filtered, same "+ From catalog" picker as the
+// case-type template editor, see catalog-ui.js), or rename/remove an
+// existing item. Every change writes the whole `workflow` field back (via
+// saveWorkflowStructure) and re-renders, same read-modify-write pattern
+// used throughout this app.
 function buildWorkflowLevelEditControls(c, workflowLike, ancestorPath) {
   const wrap = document.createElement('div');
   wrap.className = 'workflow-editor-level';
@@ -883,7 +897,7 @@ function buildWorkflowLevelEditControls(c, workflowLike, ancestorPath) {
     header.style.cssText = 'display:flex; gap:8px; align-items:center; position:relative;';
 
     const kindTag = document.createElement('span'); kindTag.className = 'badge';
-    kindTag.textContent = node.kind === 'action' ? 'Action' : 'Task';
+    kindTag.textContent = node.kind === 'container' ? 'Container' : 'Terminal';
 
     const nameInput = document.createElement('input');
     nameInput.value = node.name; nameInput.style.flex = '1';
@@ -902,9 +916,9 @@ function buildWorkflowLevelEditControls(c, workflowLike, ancestorPath) {
       confirmRow.className = 'confirm-row';
       confirmRow.style.cssText = 'position:absolute; right:0; top:34px; background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:10px; width:230px; z-index:5;';
       const msg = document.createElement('p'); msg.className = 'error'; msg.style.margin = '0 0 8px';
-      msg.textContent = node.kind === 'action'
+      msg.textContent = node.kind === 'container'
         ? `Remove "${node.name}" and everything nested under it?`
-        : `Remove "${node.name}"? Any recorded execution/verification on it is lost.`;
+        : `Remove "${node.name}"? Any recorded value on it is lost.`;
       const confirmBtn = document.createElement('button');
       confirmBtn.type = 'button'; confirmBtn.className = 'btn btn-small btn-primary'; confirmBtn.textContent = 'Confirm';
       const cancelBtn = document.createElement('button');
@@ -924,17 +938,17 @@ function buildWorkflowLevelEditControls(c, workflowLike, ancestorPath) {
 
   const addRow = document.createElement('div');
   addRow.style.cssText = 'display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;';
-  const addTaskBtn = document.createElement('button');
-  addTaskBtn.type = 'button'; addTaskBtn.className = 'btn btn-small'; addTaskBtn.textContent = '+ Task';
-  addTaskBtn.addEventListener('click', () => saveWorkflowStructure(c, ancestorPath, (level) => ({
-    ...level, items: [...level.items, newTaskNode('New task')]
+  const addTerminalBtn = document.createElement('button');
+  addTerminalBtn.type = 'button'; addTerminalBtn.className = 'btn btn-small'; addTerminalBtn.textContent = '+ Terminal';
+  addTerminalBtn.addEventListener('click', () => saveWorkflowStructure(c, ancestorPath, (level) => ({
+    ...level, items: [...level.items, newTerminalNode('New action')]
   })));
-  const addActionBtn = document.createElement('button');
-  addActionBtn.type = 'button'; addActionBtn.className = 'btn btn-small'; addActionBtn.textContent = '+ Action';
-  addActionBtn.addEventListener('click', () => saveWorkflowStructure(c, ancestorPath, (level) => ({
-    ...level, items: [...level.items, newActionNode('New action')]
+  const addContainerBtn = document.createElement('button');
+  addContainerBtn.type = 'button'; addContainerBtn.className = 'btn btn-small'; addContainerBtn.textContent = '+ Container';
+  addContainerBtn.addEventListener('click', () => saveWorkflowStructure(c, ancestorPath, (level) => ({
+    ...level, items: [...level.items, newContainerNode('New action')]
   })));
-  addRow.append(addTaskBtn, addActionBtn);
+  addRow.append(addTerminalBtn, addContainerBtn);
   wrap.appendChild(addRow);
   wrap.appendChild(buildCatalogPickerForCase(c, ancestorPath));
 
@@ -942,19 +956,19 @@ function buildWorkflowLevelEditControls(c, workflowLike, ancestorPath) {
 }
 
 function buildCatalogPickerForCase(c, ancestorPath) {
+  const contextDefId = contextDefIdFor(c, ancestorPath);
+  const defs = actionDefsForContext(contextDefId);
   const row = document.createElement('div'); row.className = 'catalog-picker-row';
+  if (defs.length === 0) {
+    row.appendChild(Object.assign(document.createElement('span'), { className: 'muted', textContent: 'No catalog actions defined at this level yet.' }));
+    return row;
+  }
   const select = document.createElement('select');
   const blankOpt = document.createElement('option'); blankOpt.value = ''; blankOpt.textContent = '(pick from catalog)';
   select.appendChild(blankOpt);
-  getCachedActionDefs().forEach((a) => {
+  defs.forEach((a) => {
     const opt = document.createElement('option');
-    opt.value = `action:${a.id}`; opt.textContent = `Action: ${actionDefPath(a.id)}`;
-    select.appendChild(opt);
-  });
-  getCachedTaskDefs().forEach((t) => {
-    const opt = document.createElement('option');
-    opt.value = `task:${t.id}`;
-    opt.textContent = `Task: ${t.parentId ? actionDefPath(t.parentId) + ' > ' + t.name : t.name}`;
+    opt.value = a.id; opt.textContent = `${a.kind === 'container' ? 'Container' : 'Terminal'}: ${actionDefPath(a.id)}`;
     select.appendChild(opt);
   });
 
@@ -962,8 +976,7 @@ function buildCatalogPickerForCase(c, ancestorPath) {
   insertBtn.type = 'button'; insertBtn.className = 'btn btn-small'; insertBtn.textContent = '+ From catalog';
   insertBtn.addEventListener('click', () => {
     if (!select.value) return;
-    const [kind, id] = select.value.split(':');
-    const node = kind === 'action' ? nodeFromActionDef(id) : nodeFromTaskDef(id);
+    const node = nodeFromActionDef(select.value);
     if (node) saveWorkflowStructure(c, ancestorPath, (level) => ({ ...level, items: [...level.items, node] }));
   });
 
@@ -981,23 +994,104 @@ async function saveWorkflowStructure(c, path, mutator) {
   await renderCaseDetail(c.id);
 }
 
-function taskStatusSummary(task) {
-  if (isTaskDone(task)) return 'Done.';
-  if (task.executedBy) return `Executed by ${task.executedBy}${task.isVerifiable && !task.verifiedBy ? ', awaiting verification.' : '.'}`;
-  return 'Not started.';
+async function saveActionField(c, path, patch) {
+  const updated = updateAtPath(c.workflow, path, (node) => ({ ...node, ...patch }));
+  recomputeAdvancement(updated);
+  await updateDoc(doc(db, 'test_cases', c.id), { workflow: updated });
+  await renderCaseDetail(c.id);
 }
 
-function buildValueSummary(values) {
-  const wrap = document.createElement('p'); wrap.className = 'muted';
-  wrap.textContent = (values && values.length) ? values.map((v) => `${v.name}: ${v.value}`).join(' · ') : '(no values recorded)';
+function optionLabel(options, sampleId, zone) {
+  const opt = options.find((o) => o.sampleId === sampleId && o.zone === zone);
+  return opt ? opt.label : sampleId + (zone ? ` (${zone})` : '');
+}
+
+// One input per parameter -- a 'list' parameter is a <select> of its
+// admin-defined options, a 'value' parameter is free text.
+function buildParameterInput(param, value, onChange) {
+  let input;
+  if (param.mode === 'list') {
+    input = document.createElement('select');
+    const blank = document.createElement('option'); blank.value = ''; blank.textContent = '(choose)';
+    input.appendChild(blank);
+    (param.options || []).forEach((optVal) => {
+      const opt = document.createElement('option'); opt.value = optVal; opt.textContent = optVal;
+      if (optVal === value) opt.selected = true;
+      input.appendChild(opt);
+    });
+  } else {
+    input = document.createElement('input'); input.className = 'mono'; input.value = value || '';
+  }
+  input.addEventListener('change', () => onChange(input.value));
+  return input;
+}
+
+// Per-parameter values for every zone/sample currently assigned to a
+// parametrized action -- a "set for all" bulk row, then one row per
+// assignment to override an individual one (SPEC.md's "apply to all, then
+// override individually").
+function buildParameterValuesEditor(c, action, path, options) {
+  const wrap = document.createElement('div'); wrap.className = 'task-execute-form';
+
+  const bulkRow = document.createElement('div'); bulkRow.className = 'value-row'; bulkRow.style.flexWrap = 'wrap';
+  const bulkLabel = document.createElement('span'); bulkLabel.className = 'muted'; bulkLabel.textContent = 'Set for all: ';
+  bulkRow.appendChild(bulkLabel);
+  const bulkInputs = {};
+  action.parameters.forEach((p) => {
+    const field = document.createElement('div'); field.className = 'field';
+    field.style.cssText = 'display:inline-block; min-width:140px; margin-right:8px;';
+    const fLabel = document.createElement('label'); fLabel.textContent = p.name;
+    const input = buildParameterInput(p, '', () => {});
+    bulkInputs[p.id] = input;
+    field.append(fLabel, input);
+    bulkRow.appendChild(field);
+  });
+  const applyBtn = document.createElement('button');
+  applyBtn.type = 'button'; applyBtn.className = 'btn btn-small'; applyBtn.textContent = 'Apply to all';
+  applyBtn.addEventListener('click', () => {
+    const nextAssigned = action.assignedTo.map((a) => ({
+      ...a,
+      values: action.parameters.map((p) => ({ parameterId: p.id, value: bulkInputs[p.id].value }))
+    }));
+    saveActionField(c, path, { assignedTo: nextAssigned });
+  });
+  bulkRow.appendChild(applyBtn);
+  wrap.appendChild(bulkRow);
+
+  action.assignedTo.forEach((a, aIdx) => {
+    const row = document.createElement('div'); row.className = 'action-row';
+    const label = document.createElement('span'); label.textContent = optionLabel(options, a.sampleId, a.zone);
+    row.appendChild(label);
+    const fieldsWrap = document.createElement('span'); fieldsWrap.style.cssText = 'display:flex; gap:8px; flex-wrap:wrap;';
+    action.parameters.forEach((p) => {
+      const existing = (a.values || []).find((v) => v.parameterId === p.id);
+      const input = buildParameterInput(p, existing ? existing.value : '', (val) => {
+        const nextAssigned = action.assignedTo.map((entry, i) => {
+          if (i !== aIdx) return entry;
+          const hasSlot = (entry.values || []).some((v) => v.parameterId === p.id);
+          const values = hasSlot
+            ? entry.values.map((v) => (v.parameterId === p.id ? { ...v, value: val } : v))
+            : [...(entry.values || []), { parameterId: p.id, value: val }];
+          return { ...entry, values };
+        });
+        saveActionField(c, path, { assignedTo: nextAssigned });
+      });
+      fieldsWrap.appendChild(input);
+    });
+    row.appendChild(fieldsWrap);
+    wrap.appendChild(row);
+  });
+
   return wrap;
 }
 
-// Live tagging of which sample(s)/zone(s) a task applies to -- a list, set
-// at execution time, not something a sample owns (SPEC.md's "Item / Sample
-// / Zone"). Plain toggle chips rather than a <select multiple> for
-// friendlier touch targets.
-function buildAssignmentEditor(c, task, path, samples) {
+// Live tagging of which sample(s)/zone(s) a terminal action applies to --
+// a list, set at execution time, not something a sample owns (SPEC.md's
+// "Item / Sample / Zone"). Plain toggle chips rather than a
+// <select multiple> for friendlier touch targets. Toggling a chip adds/
+// removes an assignedTo entry (with a blank value per parameter, ready to
+// fill in via buildParameterValuesEditor below).
+function buildAssignmentEditor(c, action, path, samples) {
   const wrap = document.createElement('div'); wrap.className = 'task-assignment';
   const label = document.createElement('label'); label.textContent = 'Samples / zones';
   wrap.appendChild(label);
@@ -1016,149 +1110,49 @@ function buildAssignmentEditor(c, task, path, samples) {
   const chipsWrap = document.createElement('div');
   chipsWrap.style.cssText = 'display:flex; flex-wrap:wrap; gap:6px;';
   options.forEach((opt) => {
-    const isAssigned = (task.assignedTo || []).some((a) => a.sampleId === opt.sampleId && a.zone === opt.zone);
+    const isAssigned = (action.assignedTo || []).some((a) => a.sampleId === opt.sampleId && a.zone === opt.zone);
     const chip = document.createElement('button');
     chip.type = 'button'; chip.className = 'btn btn-small' + (isAssigned ? ' active' : '');
     chip.textContent = opt.label;
     chip.addEventListener('click', () => {
-      const current = task.assignedTo || [];
+      const current = action.assignedTo || [];
       const exists = current.some((a) => a.sampleId === opt.sampleId && a.zone === opt.zone);
       const next = exists
         ? current.filter((a) => !(a.sampleId === opt.sampleId && a.zone === opt.zone))
-        : [...current, { sampleId: opt.sampleId, zone: opt.zone }];
-      saveTaskField(c, path, { assignedTo: next });
+        : [...current, { sampleId: opt.sampleId, zone: opt.zone, values: (action.parameters || []).map((p) => ({ parameterId: p.id, value: '' })) }];
+      saveActionField(c, path, { assignedTo: next });
     });
     chipsWrap.appendChild(chip);
   });
   wrap.appendChild(chipsWrap);
+
+  if ((action.parameters || []).length > 0 && (action.assignedTo || []).length > 0) {
+    wrap.appendChild(buildParameterValuesEditor(c, action, path, options));
+  }
+
   return wrap;
 }
 
-// Fills in a task's value-object template: a fixed slot gets one input, a
-// duplicable one starts with one and can add more live ("+ Add another"),
-// per SPEC.md's Task field list. Shared between Execute (executorValues)
-// and Verify (verifierValues, an independent set against the same
-// template, not a copy of the executor's numbers).
-function buildExecuteForm(c, task, path, label, onSave) {
-  const form = document.createElement('div'); form.className = 'task-execute-form';
-  const rowsBySlot = new Map();
-
-  (task.values || []).forEach((slot) => {
-    const slotWrap = document.createElement('div'); slotWrap.className = 'field';
-    const slotLabel = document.createElement('label');
-    slotLabel.textContent = slot.name + (slot.mode === 'duplicable' ? ' (add as many as needed)' : '');
-    slotWrap.appendChild(slotLabel);
-    const inputsWrap = document.createElement('div');
-    slotWrap.appendChild(inputsWrap);
-    const inputs = [];
-    rowsBySlot.set(slot.name, inputs);
-
-    function addInstance() {
-      const row = document.createElement('div'); row.className = 'value-row';
-      const input = document.createElement('input'); input.className = 'mono';
-      row.appendChild(input);
-      if (slot.mode === 'duplicable') {
-        const rm = document.createElement('button'); rm.type = 'button'; rm.className = 'btn btn-small'; rm.textContent = '✕';
-        rm.addEventListener('click', () => { row.remove(); inputs.splice(inputs.indexOf(input), 1); });
-        row.appendChild(rm);
-      }
-      inputsWrap.appendChild(row);
-      inputs.push(input);
-    }
-    addInstance();
-
-    if (slot.mode === 'duplicable') {
-      const addBtn = document.createElement('button');
-      addBtn.type = 'button'; addBtn.className = 'btn btn-small'; addBtn.textContent = '+ Add another';
-      addBtn.addEventListener('click', addInstance);
-      slotWrap.appendChild(addBtn);
-    }
-    form.appendChild(slotWrap);
-  });
-
-  const saveBtn = document.createElement('button');
-  saveBtn.type = 'button'; saveBtn.className = 'btn btn-primary btn-small'; saveBtn.textContent = label;
-  saveBtn.addEventListener('click', async () => {
-    saveBtn.disabled = true;
-    const values = [];
-    rowsBySlot.forEach((inputs, name) => {
-      inputs.forEach((input) => {
-        const v = input.value.trim();
-        if (v) values.push({ name, value: v });
-      });
-    });
-    await onSave(values);
-  });
-  form.appendChild(saveBtn);
-  return form;
-}
-
-async function saveTaskField(c, path, patch) {
-  const updated = updateAtPath(c.workflow, path, (node) => ({ ...node, ...patch }));
-  recomputeAdvancement(updated);
-  await updateDoc(doc(db, 'test_cases', c.id), { workflow: updated });
-  await renderCaseDetail(c.id);
-}
-
-function buildTaskPanel(c, task, path, samples, isLive) {
+function buildTerminalActionPanel(c, action, path, samples, isLive) {
   const wrap = document.createElement('div'); wrap.className = 'task-panel';
-  const title = document.createElement('h4'); title.textContent = task.name;
+  const title = document.createElement('h4'); title.textContent = action.name;
   wrap.appendChild(title);
 
   if (!isLive) {
-    wrap.appendChild(readonlyNote(taskStatusSummary(task)));
+    wrap.appendChild(readonlyNote(action.isDone ? 'Done.' : 'Not done yet.'));
     return wrap;
   }
 
-  // isComplete -- a plain manual toggle that can force a task done
-  // regardless of whether its value objects are filled in (SPEC.md).
-  const completeLabel = document.createElement('label'); completeLabel.className = 'checkbox-inline';
-  const completeInput = document.createElement('input'); completeInput.type = 'checkbox'; completeInput.checked = !!task.isComplete;
-  completeInput.addEventListener('change', () => saveTaskField(c, path, { isComplete: completeInput.checked }));
-  completeLabel.append(completeInput, ' Mark complete');
-  wrap.appendChild(completeLabel);
+  // Terminal action: marked done when needed, that's the entire record --
+  // no executor, no timestamp, no verification (SPEC.md's deliberately
+  // thinner audit trail than 0.5.0's Task).
+  const doneLabel = document.createElement('label'); doneLabel.className = 'checkbox-inline';
+  const doneInput = document.createElement('input'); doneInput.type = 'checkbox'; doneInput.checked = !!action.isDone;
+  doneInput.addEventListener('change', () => saveActionField(c, path, { isDone: doneInput.checked }));
+  doneLabel.append(doneInput, ' Mark done');
+  wrap.appendChild(doneLabel);
 
-  wrap.appendChild(buildAssignmentEditor(c, task, path, samples));
-
-  if (!task.executedBy) {
-    // Plain client-side Date, not serverTimestamp() -- the sentinel isn't
-    // supported on a value nested inside an array (this task lives inside
-    // `workflow`'s items[] tree), same constraint 0.4.1's archiving
-    // workflow already hit. Still stored as a real Firestore Timestamp.
-    wrap.appendChild(buildExecuteForm(c, task, path, 'Execute', (values) => saveTaskField(c, path, {
-      executedBy: myProfile.username, executionTimestamp: new Date(), executorValues: values
-    })));
-    return wrap;
-  }
-
-  const execInfo = document.createElement('p'); execInfo.className = 'muted';
-  execInfo.textContent = `Executed by ${task.executedBy}`;
-  wrap.appendChild(execInfo);
-  wrap.appendChild(buildValueSummary(task.executorValues));
-
-  if (task.isVerifiable) {
-    if (task.verifiedBy) {
-      const verInfo = document.createElement('p'); verInfo.className = 'muted';
-      verInfo.textContent = `Verified by ${task.verifiedBy}`;
-      wrap.appendChild(verInfo);
-      wrap.appendChild(buildValueSummary(task.verifierValues));
-    } else if (task.executedBy !== myProfile.username) {
-      wrap.appendChild(buildExecuteForm(c, task, path, 'Verify', (values) => saveTaskField(c, path, {
-        verifiedBy: myProfile.username, verificationTimestamp: new Date(), verifierValues: values
-      })));
-    } else {
-      wrap.appendChild(readonlyNote('(awaiting verification by someone else)'));
-    }
-  }
-
-  const reopenBtn = document.createElement('button');
-  reopenBtn.type = 'button'; reopenBtn.className = 'btn btn-small'; reopenBtn.textContent = 'Reopen';
-  reopenBtn.style.marginTop = '10px';
-  reopenBtn.addEventListener('click', () => saveTaskField(c, path, {
-    executedBy: null, executionTimestamp: null, executorValues: [],
-    verifiedBy: null, verificationTimestamp: null, verifierValues: []
-  }));
-  wrap.appendChild(reopenBtn);
+  wrap.appendChild(buildAssignmentEditor(c, action, path, samples));
 
   return wrap;
 }

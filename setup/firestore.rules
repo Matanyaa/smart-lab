@@ -82,16 +82,15 @@ service cloud.firestore {
       allow read: if isSignedIn();
       allow write: if isAdmin();
     }
-    // Reusable Action/Task catalog (see workflow.js/catalog-ui.js) -- write
-    // stays admin-only (only admin authors catalog definitions), but read
-    // widened to isStaff() (2026-09-23) once case-staff also got their own
-    // "+ From catalog" picker inside a live case's Workflow edit mode
-    // (cases.js) -- not just the admin-only case-type template editor.
+    // Reusable Action catalog (see workflow.js/catalog-ui.js) -- write
+    // stays admin-only (only admin authors catalog definitions), read is
+    // isStaff() since case-staff also have their own "+ From catalog"
+    // picker inside a live case's Workflow edit mode (cases.js), not just
+    // the admin-only case-type template editor. 0.6.0: the separate
+    // `taskDefs` collection from 0.5.0-t02 is retired -- Task folded into
+    // Action as the terminal kind, so there's only ever this one catalog
+    // collection now.
     match /actionDefs/{actionDefId} {
-      allow read: if isStaff();
-      allow write: if isAdmin();
-    }
-    match /taskDefs/{taskDefId} {
       allow read: if isStaff();
       allow write: if isAdmin();
     }
@@ -120,10 +119,6 @@ service cloud.firestore {
       allow read: if isStaff();
       allow write: if isAdmin();
     }
-    match /test_taskDefs/{taskDefId} {
-      allow read: if isStaff();
-      allow write: if isAdmin();
-    }
 
     match /cases/{caseId} {
       // 0.4.1: admin dropped entirely (was isStaff(), which included
@@ -135,17 +130,18 @@ service cloud.firestore {
       // openedBy is set by the app, not user-entered -- enforced here too,
       // not just trusted client-side.
       allow create: if myRole() == 'team_leader' && request.resource.data.openedBy == myUsername();
-      // 0.5.0: a case's own Workflow/Action/Task content now lives inside
-      // this doc's own `workflow` field (see workflow.js) rather than a
-      // separate staff-writable `actions` subcollection -- so this rule
-      // needs to keep letting any case-staff member execute/verify a task
-      // even when they're not the case's own manager, exactly as any staff
-      // member could freely write the old actions subcollection. It does
-      // that by allowing any case-staff write as long as `workflow` is the
-      // ONLY top-level field that changed (the app always writes it alone,
-      // see cases.js's saveTaskField/attachForceJump); anything broader --
-      // editing the case's own info fields, deleting -- still needs
-      // team_leader or this case's own caseManager, same as 0.4.1.
+      // A case's own Workflow/Action content lives inside this doc's own
+      // `workflow` field (see workflow.js) rather than a separate
+      // staff-writable `actions` subcollection (0.4.1's shape) -- so this
+      // rule needs to keep letting any case-staff member mark an action
+      // done even when they're not the case's own manager, exactly as any
+      // staff member could freely write the old actions subcollection. It
+      // does that by allowing any case-staff write as long as `workflow`
+      // is the ONLY top-level field that changed (the app always writes it
+      // alone, see cases.js's saveActionField/saveWorkflowStructure/
+      // attachForceJump); anything broader -- editing the case's own info
+      // fields, deleting -- still needs team_leader or this case's own
+      // caseManager, same as 0.4.1.
       allow update: if isCaseStaff() && (
         myRole() == 'team_leader' ||
         resource.data.caseManager == myUsername() ||
@@ -158,10 +154,10 @@ service cloud.firestore {
       // done-stage restriction is what's being lifted.
       allow delete: if isSignedIn() && myRole() == 'team_leader';
 
-      // 0.5.0: no more `actions` subcollection -- a task's execution/
-      // verification state lives on the case doc's own `workflow` field
-      // instead (see the update rule above). Samples themselves are
-      // unchanged: pure item/zone/name structure, no actions of their own.
+      // No `actions` subcollection -- an action's live state lives on the
+      // case doc's own `workflow` field instead (see the update rule
+      // above). Samples themselves are unchanged: pure item/zone/name
+      // structure, no actions of their own.
       match /samples/{sampleId} {
         allow read, create, update: if isCaseStaff();
         allow delete: if isSignedIn() && myRole() == 'team_leader';
