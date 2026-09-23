@@ -1,19 +1,19 @@
-import { db } from './firebase-init.js?v=0.6.0-t01';
+import { db } from './firebase-init.js?v=0.6.0-t02';
 import {
   collection, doc, getDoc, getDocs, addDoc, updateDoc, deleteDoc, query, where, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { loadCaseTypes, getCachedCaseTypes, findCaseTypeById } from './case-types-ui.js?v=0.6.0-t01';
+import { loadCaseTypes, getCachedCaseTypes, findCaseTypeById } from './case-types-ui.js?v=0.6.0-t02';
 import {
   loadClientOrgsAndClients, getCachedClientOrgs, getCachedClientsForOrg, fetchClientsForOrg,
   findClientById, findClientOrgById
-} from './clients-ui.js?v=0.6.0-t01';
+} from './clients-ui.js?v=0.6.0-t02';
 import {
-  emptyWorkflow, seedWorkflow, currentPathOf, nodeAtPath, updateAtPath, recomputeAdvancement,
-  newTerminalNode, newContainerNode
-} from './workflow.js?v=0.6.0-t01';
+  emptyWorkflow, seedWorkflow, isNodeDone, currentPathOf, nodeAtPath, updateAtPath, recomputeAdvancement,
+  newTerminalNode
+} from './workflow.js?v=0.6.0-t02';
 import {
   loadCatalog, actionDefsForContext, actionDefPath, nodeFromActionDef
-} from './catalog-ui.js?v=0.6.0-t01';
+} from './catalog-ui.js?v=0.6.0-t02';
 
 // ---------------------------------------------------------------------
 // Core case/sample/workflow model. Internal to the lab team -- admin has
@@ -795,11 +795,26 @@ function buildWorkflowSection(c, samples) {
 
 // An items[]-bearing level with nothing in it yet -- either a genuinely
 // empty top-level Workflow (case type had no template) or a container
-// Action with no children yet. No circles to show (buildWorkflowLevel
-// assumes at least one item), so this is its own small branch: an
-// add-controls panel in edit mode, a plain note otherwise.
+// Action with no children yet. Still a Workflow, so it still gets its
+// implicit Start/End pair (immediately adjacent -- an empty workflow has
+// no last real action to wait on, so End is trivially reached the moment
+// Start is), just without buildWorkflowLevel's full items loop since
+// there's nothing to show between them. Add-controls panel in edit mode,
+// a plain note otherwise.
 function buildEmptyWorkflowLevel(c, workflowLike, ancestorPath, emptyLabel) {
   const wrap = document.createElement('div');
+
+  const flow = document.createElement('div'); flow.className = 'stage-flow';
+  const startNode = document.createElement('div');
+  startNode.className = 'stage-flow-node stage-flow-marker done';
+  startNode.textContent = 'Start';
+  const line = document.createElement('div'); line.className = 'stage-flow-line done';
+  const endNode = document.createElement('div');
+  endNode.className = 'stage-flow-node stage-flow-marker done';
+  endNode.textContent = 'End';
+  flow.append(startNode, line, endNode);
+  wrap.appendChild(flow);
+
   if (workflowEditMode && canUpdateCase(c)) {
     wrap.appendChild(buildWorkflowLevelEditControls(c, workflowLike, ancestorPath));
   } else {
@@ -826,6 +841,20 @@ function buildWorkflowLevel(c, workflowLike, ancestorPath, samples, ancestorLive
   const viewedIdx = viewedPath.length > ancestorPath.length ? viewedPath[ancestorPath.length] : realCurrentIdx;
 
   const flow = document.createElement('div'); flow.className = 'stage-flow';
+
+  // Start/End (SPEC.md): every workflow implicitly has these -- never
+  // authored, never stored as real nodes. Start is "passed through" the
+  // instant this level becomes current, i.e. it's always shown done the
+  // moment we're viewing this level's contents at all; End is reached the
+  // instant the last real item is done. Plain markers, not buttons --
+  // nothing to click or force-jump to.
+  const startNode = document.createElement('div');
+  startNode.className = 'stage-flow-node stage-flow-marker done';
+  startNode.textContent = 'Start';
+  flow.appendChild(startNode);
+  const startLine = document.createElement('div'); startLine.className = 'stage-flow-line done';
+  flow.appendChild(startLine);
+
   workflowLike.items.forEach((node, idx) => {
     if (idx > 0) {
       const line = document.createElement('div');
@@ -846,6 +875,15 @@ function buildWorkflowLevel(c, workflowLike, ancestorPath, samples, ancestorLive
     attachForceJump(btn, flow, c, ancestorPath, idx, node.name);
     flow.appendChild(btn);
   });
+
+  const reachedEnd = isNodeDone(workflowLike.items[workflowLike.items.length - 1]);
+  const endLine = document.createElement('div'); endLine.className = 'stage-flow-line' + (reachedEnd ? ' done' : '');
+  flow.appendChild(endLine);
+  const endNode = document.createElement('div');
+  endNode.className = 'stage-flow-node stage-flow-marker' + (reachedEnd ? ' done' : '');
+  endNode.textContent = 'End';
+  flow.appendChild(endNode);
+
   wrap.appendChild(flow);
 
   if (workflowEditMode && canUpdateCase(c)) {
@@ -880,13 +918,26 @@ function contextDefIdFor(c, ancestorPath) {
   return node ? (node.defId || null) : null;
 }
 
+// Swaps the items at i/j within one level, keeping currentIndex pointing
+// at the same *item* rather than the same numeric slot (so reordering
+// never silently makes an unrelated item look "current").
+function swapItems(level, i, j) {
+  const items = [...level.items];
+  [items[i], items[j]] = [items[j], items[i]];
+  let currentIndex = level.currentIndex;
+  if (currentIndex === i) currentIndex = j;
+  else if (currentIndex === j) currentIndex = i;
+  return { ...level, items, currentIndex };
+}
+
 // Structural editing for one items[]-bearing level of a LIVE case's own
-// Workflow -- add a blank terminal/container action, insert a copy from
-// the catalog (context-filtered, same "+ From catalog" picker as the
-// case-type template editor, see catalog-ui.js), or rename/remove an
-// existing item. Every change writes the whole `workflow` field back (via
-// saveWorkflowStructure) and re-renders, same read-modify-write pattern
-// used throughout this app.
+// Workflow -- add a blank action, insert a copy from the catalog
+// (context-filtered, same "+ From catalog" picker as the case-type
+// template editor, see catalog-ui.js), reorder/rename/remove an existing
+// item, or turn one into a container so it can hold its own sub-actions
+// (see the "+ Sub-action" button below). Every change writes the whole
+// `workflow` field back (via saveWorkflowStructure) and re-renders, same
+// read-modify-write pattern used throughout this app.
 function buildWorkflowLevelEditControls(c, workflowLike, ancestorPath) {
   const wrap = document.createElement('div');
   wrap.className = 'workflow-editor-level';
@@ -894,17 +945,44 @@ function buildWorkflowLevelEditControls(c, workflowLike, ancestorPath) {
   workflowLike.items.forEach((node, idx) => {
     const row = document.createElement('div'); row.className = 'workflow-node-editor';
     const header = document.createElement('div');
-    header.style.cssText = 'display:flex; gap:8px; align-items:center; position:relative;';
+    header.style.cssText = 'display:flex; gap:6px; align-items:center; position:relative; flex-wrap:wrap;';
 
-    const kindTag = document.createElement('span'); kindTag.className = 'badge';
-    kindTag.textContent = node.kind === 'container' ? 'Container' : 'Terminal';
+    const upBtn = document.createElement('button');
+    upBtn.type = 'button'; upBtn.className = 'btn btn-small'; upBtn.textContent = '↑'; upBtn.title = 'Move up';
+    upBtn.disabled = idx === 0;
+    upBtn.addEventListener('click', () => saveWorkflowStructure(c, ancestorPath, (level) => swapItems(level, idx, idx - 1)));
+
+    const downBtn = document.createElement('button');
+    downBtn.type = 'button'; downBtn.className = 'btn btn-small'; downBtn.textContent = '↓'; downBtn.title = 'Move down';
+    downBtn.disabled = idx === workflowLike.items.length - 1;
+    downBtn.addEventListener('click', () => saveWorkflowStructure(c, ancestorPath, (level) => swapItems(level, idx, idx + 1)));
 
     const nameInput = document.createElement('input');
-    nameInput.value = node.name; nameInput.style.flex = '1';
+    nameInput.value = node.name; nameInput.style.flex = '1'; nameInput.style.minWidth = '100px';
     nameInput.addEventListener('change', () => saveWorkflowStructure(c, ancestorPath, (level) => ({
       ...level,
       items: level.items.map((n, i) => (i === idx ? { ...n, name: nameInput.value.trim() || n.name } : n))
     })));
+
+    // Turns this action into a container (if it isn't one already) and
+    // navigates into it, ready to add whatever goes inside -- e.g. adding
+    // "Draft" under "Writing". Promoting a terminal action this way drops
+    // its own done flag/parameters/assignments (a container's "content"
+    // is its nested workflow, not data entry of its own), same
+    // terminal-only default used elsewhere.
+    const subActionBtn = document.createElement('button');
+    subActionBtn.type = 'button'; subActionBtn.className = 'btn btn-small'; subActionBtn.textContent = '+ Sub-action';
+    subActionBtn.addEventListener('click', async () => {
+      const nodePath = [...ancestorPath, idx];
+      if (node.kind !== 'container') {
+        await saveWorkflowStructure(c, ancestorPath, (level) => ({
+          ...level,
+          items: level.items.map((n, i) => (i === idx ? { kind: 'container', id: n.id, defId: n.defId, name: n.name, items: [], currentIndex: 0 } : n))
+        }));
+      }
+      viewedPath = nodePath;
+      await renderCaseDetail(c.id);
+    });
 
     const removeBtn = document.createElement('button');
     removeBtn.type = 'button'; removeBtn.className = 'icon-btn icon-btn-small icon-btn-danger';
@@ -931,24 +1009,19 @@ function buildWorkflowLevelEditControls(c, workflowLike, ancestorPath) {
       header.appendChild(confirmRow);
     });
 
-    header.append(kindTag, nameInput, removeBtn);
+    header.append(upBtn, downBtn, nameInput, subActionBtn, removeBtn);
     row.appendChild(header);
     wrap.appendChild(row);
   });
 
   const addRow = document.createElement('div');
   addRow.style.cssText = 'display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;';
-  const addTerminalBtn = document.createElement('button');
-  addTerminalBtn.type = 'button'; addTerminalBtn.className = 'btn btn-small'; addTerminalBtn.textContent = '+ Terminal';
-  addTerminalBtn.addEventListener('click', () => saveWorkflowStructure(c, ancestorPath, (level) => ({
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button'; addBtn.className = 'btn btn-small'; addBtn.textContent = '+ Action';
+  addBtn.addEventListener('click', () => saveWorkflowStructure(c, ancestorPath, (level) => ({
     ...level, items: [...level.items, newTerminalNode('New action')]
   })));
-  const addContainerBtn = document.createElement('button');
-  addContainerBtn.type = 'button'; addContainerBtn.className = 'btn btn-small'; addContainerBtn.textContent = '+ Container';
-  addContainerBtn.addEventListener('click', () => saveWorkflowStructure(c, ancestorPath, (level) => ({
-    ...level, items: [...level.items, newContainerNode('New action')]
-  })));
-  addRow.append(addTerminalBtn, addContainerBtn);
+  addRow.append(addBtn);
   wrap.appendChild(addRow);
   wrap.appendChild(buildCatalogPickerForCase(c, ancestorPath));
 
@@ -968,7 +1041,7 @@ function buildCatalogPickerForCase(c, ancestorPath) {
   select.appendChild(blankOpt);
   defs.forEach((a) => {
     const opt = document.createElement('option');
-    opt.value = a.id; opt.textContent = `${a.kind === 'container' ? 'Container' : 'Terminal'}: ${actionDefPath(a.id)}`;
+    opt.value = a.id; opt.textContent = actionDefPath(a.id);
     select.appendChild(opt);
   });
 

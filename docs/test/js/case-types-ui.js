@@ -1,27 +1,35 @@
-import { db } from './firebase-init.js?v=0.6.0-t01';
+import { db } from './firebase-init.js?v=0.6.0-t02';
 import {
   doc, updateDoc, deleteDoc, collection, getDocs, addDoc
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { newTerminalNode, newContainerNode, newParameter, emptyWorkflow, updateAtPath } from './workflow.js?v=0.6.0-t01';
-import { loadCatalog, actionDefsForContext, actionDefPath, nodeFromActionDef } from './catalog-ui.js?v=0.6.0-t01';
+import { newTerminalNode, newParameter, emptyWorkflow, updateAtPath } from './workflow.js?v=0.6.0-t02';
+import { loadCatalog, actionDefsForContext, actionDefPath, nodeFromActionDef } from './catalog-ui.js?v=0.6.0-t02';
 
 // ---------------------------------------------------------------------
 // Admin: case type CRUD, plus the Workflow-template authoring screen. A
 // case type's `workflowTemplate` (replacing 0.4.1's
 // `labWorkflowTemplate`/`archivingWorkflowTemplate` split) is what a new
 // case's own Workflow gets deep-copied from at creation -- see
-// cases.js/workflow.js. Plain top-to-bottom add/remove/edit, no
-// drag-reorder (same phase-1 boundary as before).
+// cases.js/workflow.js.
 //
-// 0.6.0: Task retired -- everything is an Action, either terminal
-// ("+ Terminal") or a container that holds its own nested items
-// ("+ Container"). The "+ From catalog" picker is now context-filtered
-// (SPEC.md's hierarchy-scoping): at the template root it only offers
-// case-level (`parentId: null`) definitions; inside a container node's
-// own nested editor it only offers definitions parented under THAT
-// node's own `defId` (which catalog action, if any, it was copied from --
-// an ad hoc "+ Container" has no `defId`, so nothing in the catalog can
-// ever be placed inside it until it's replaced with a catalog pick).
+// 0.6.0: Task retired -- everything is an Action, either terminal (a
+// plain done/not-done step, optionally parametrized) or a container that
+// holds its own nested items. "+ Action" always adds a terminal action;
+// "+ Sub-action" on any existing action promotes it to a container (if it
+// isn't one already) so it can hold children -- there's no separate
+// upfront "which kind am I creating" choice in this editor, unlike the
+// catalog's own authoring form (catalog-ui.js), which keeps an explicit
+// Kind selector since a reusable library definition is a more deliberate
+// choice. Items can be reordered (↑/↓) within their own level -- still no
+// drag-and-drop, just swap-with-neighbor.
+//
+// The "+ From catalog" picker is context-filtered (SPEC.md's hierarchy-
+// scoping): at the template root it only offers case-level
+// (`parentId: null`) definitions; inside a container node's own nested
+// editor it only offers definitions parented under THAT node's own
+// `defId` (which catalog action, if any, it was copied from -- an ad hoc
+// container has no `defId`, so nothing in the catalog can ever be placed
+// inside it until it's replaced with a catalog pick).
 // ---------------------------------------------------------------------
 const addCaseTypeForm = document.getElementById('addCaseTypeForm');
 const addCaseTypeError = document.getElementById('addCaseTypeError');
@@ -131,32 +139,40 @@ async function saveTemplate(ct, newWorkflow) {
   if (container) container.replaceChildren(buildItemsEditor(ct, [], ct.workflowTemplate, null));
 }
 
+// Swaps the items at i/j within one level, keeping currentIndex pointing
+// at the same *item* rather than the same numeric slot.
+function swapItems(level, i, j) {
+  const items = [...level.items];
+  [items[i], items[j]] = [items[j], items[i]];
+  let currentIndex = level.currentIndex;
+  if (currentIndex === i) currentIndex = j;
+  else if (currentIndex === j) currentIndex = i;
+  return { ...level, items, currentIndex };
+}
+
 // Recursive: renders one items[] level (the template root, or a
-// container's own nested items) with add-terminal/add-container controls
-// plus each child's own inline editor. `path` is the index path from the
-// template root to THIS items[] array; `contextDefId` is the catalog
-// definition id this level corresponds to (null at the template root =
-// case-level) -- used to filter the "+ From catalog" picker per SPEC's
-// hierarchy-scoping. Read-modify-write-back-whole-field-then-rerender-
-// just-this-editor, same pattern as the rest of the app's structural
-// editors (archiving workflow, sample edit).
+// container's own nested items) with an add-action control plus each
+// child's own inline editor. `path` is the index path from the template
+// root to THIS items[] array; `contextDefId` is the catalog definition id
+// this level corresponds to (null at the template root = case-level) --
+// used to filter the "+ From catalog" picker per SPEC's hierarchy-scoping.
+// Read-modify-write-back-whole-field-then-rerender-just-this-editor, same
+// pattern as the rest of the app's structural editors (archiving
+// workflow, sample edit).
 function buildItemsEditor(ct, path, workflowLike, contextDefId) {
   const wrap = document.createElement('div');
   wrap.className = 'workflow-editor-level';
 
   (workflowLike.items || []).forEach((node, idx) => {
-    wrap.appendChild(buildNodeEditor(ct, [...path, idx], node));
+    wrap.appendChild(buildNodeEditor(ct, [...path, idx], node, workflowLike.items.length));
   });
 
   const addRow = document.createElement('div');
   addRow.style.cssText = 'display:flex; gap:8px; margin-top:8px;';
-  const addTerminalBtn = document.createElement('button');
-  addTerminalBtn.type = 'button'; addTerminalBtn.className = 'btn btn-small'; addTerminalBtn.textContent = '+ Terminal';
-  addTerminalBtn.addEventListener('click', () => addNode(ct, path, newTerminalNode('New action')));
-  const addContainerBtn = document.createElement('button');
-  addContainerBtn.type = 'button'; addContainerBtn.className = 'btn btn-small'; addContainerBtn.textContent = '+ Container';
-  addContainerBtn.addEventListener('click', () => addNode(ct, path, newContainerNode('New action')));
-  addRow.append(addTerminalBtn, addContainerBtn);
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button'; addBtn.className = 'btn btn-small'; addBtn.textContent = '+ Action';
+  addBtn.addEventListener('click', () => addNode(ct, path, newTerminalNode('New action')));
+  addRow.append(addBtn);
   wrap.appendChild(addRow);
   wrap.appendChild(buildCatalogPicker(ct, path, contextDefId));
 
@@ -180,7 +196,7 @@ function buildCatalogPicker(ct, path, contextDefId) {
   select.appendChild(blankOpt);
   defs.forEach((a) => {
     const opt = document.createElement('option');
-    opt.value = a.id; opt.textContent = `${a.kind === 'container' ? 'Container' : 'Terminal'}: ${actionDefPath(a.id)}`;
+    opt.value = a.id; opt.textContent = actionDefPath(a.id);
     select.appendChild(opt);
   });
 
@@ -214,25 +230,52 @@ async function removeNode(ct, path) {
   await mutateNode(ct, parentPath, (level) => ({ ...level, items: level.items.filter((_, i) => i !== idx) }));
 }
 
-function buildNodeEditor(ct, path, node) {
+async function moveNode(ct, path, direction) {
+  const parentPath = path.slice(0, -1);
+  const idx = path[path.length - 1];
+  await mutateNode(ct, parentPath, (level) => swapItems(level, idx, idx + direction));
+}
+
+function buildNodeEditor(ct, path, node, siblingCount) {
+  const idx = path[path.length - 1];
   const box = document.createElement('div');
   box.className = 'workflow-node-editor';
 
   const header = document.createElement('div');
-  header.style.cssText = 'display:flex; gap:8px; align-items:center;';
-  const kindTag = document.createElement('span');
-  kindTag.className = 'badge';
-  kindTag.textContent = node.kind === 'container' ? 'Container' : 'Terminal';
+  header.style.cssText = 'display:flex; gap:6px; align-items:center; flex-wrap:wrap;';
+
+  const upBtn = document.createElement('button');
+  upBtn.type = 'button'; upBtn.className = 'btn btn-small'; upBtn.textContent = '↑'; upBtn.title = 'Move up';
+  upBtn.disabled = idx === 0;
+  upBtn.addEventListener('click', () => moveNode(ct, path, -1));
+
+  const downBtn = document.createElement('button');
+  downBtn.type = 'button'; downBtn.className = 'btn btn-small'; downBtn.textContent = '↓'; downBtn.title = 'Move down';
+  downBtn.disabled = idx === siblingCount - 1;
+  downBtn.addEventListener('click', () => moveNode(ct, path, 1));
+
   const nameInput = document.createElement('input');
   nameInput.value = node.name;
-  nameInput.style.flex = '1';
+  nameInput.style.flex = '1'; nameInput.style.minWidth = '100px';
   nameInput.addEventListener('change', () => mutateNode(ct, path, (n) => ({ ...n, name: nameInput.value.trim() || n.name })));
+
+  // Turns this action into a container (if it isn't one already), so it
+  // can hold its own sub-actions -- e.g. adding "Draft" under "Writing".
+  // Promoting a terminal action drops its own parameters (a container's
+  // "content" is its nested workflow, not data entry of its own).
+  const subActionBtn = document.createElement('button');
+  subActionBtn.type = 'button'; subActionBtn.className = 'btn btn-small'; subActionBtn.textContent = '+ Sub-action';
+  subActionBtn.addEventListener('click', () => {
+    if (node.kind === 'container') return;
+    mutateNode(ct, path, (n) => ({ kind: 'container', id: n.id, defId: n.defId, name: n.name, items: [], currentIndex: 0 }));
+  });
+
   const removeBtn = document.createElement('button');
   removeBtn.type = 'button'; removeBtn.className = 'icon-btn icon-btn-small icon-btn-danger';
   removeBtn.title = 'Remove'; removeBtn.setAttribute('aria-label', 'Remove');
   removeBtn.innerHTML = TRASH_ICON_SVG;
   removeBtn.addEventListener('click', () => removeNode(ct, path));
-  header.append(kindTag, nameInput, removeBtn);
+  header.append(upBtn, downBtn, nameInput, subActionBtn, removeBtn);
   box.appendChild(header);
 
   if (node.kind === 'terminal') {
