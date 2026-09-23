@@ -1,10 +1,10 @@
-import { db, USERNAME_DOMAIN, createAuthAccountWithoutSigningOut } from './firebase-init.js?v=0.6.0-t03';
+import { db, USERNAME_DOMAIN, createAuthAccountWithoutSigningOut } from './firebase-init.js?v=0.6.0-t04';
 import {
   doc, setDoc, updateDoc, deleteDoc, collection, getDocs
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { renderCaseTypeList } from './case-types-ui.js?v=0.6.0-t03';
-import { renderClientOrgList, getCachedClientOrgs, loadClientOrgsAndClients } from './clients-ui.js?v=0.6.0-t03';
-import { renderCatalog } from './catalog-ui.js?v=0.6.0-t03';
+import { renderCaseTypeList } from './case-types-ui.js?v=0.6.0-t04';
+import { renderClientOrgList, getCachedClientOrgs, loadClientOrgsAndClients } from './clients-ui.js?v=0.6.0-t04';
+import { renderCatalog } from './catalog-ui.js?v=0.6.0-t04';
 
 // ---------------------------------------------------------------------
 // Admin: add user + edit role + reset another user's password.

@@ -1,19 +1,19 @@
-import { db } from './firebase-init.js?v=0.6.0-t03';
+import { db } from './firebase-init.js?v=0.6.0-t04';
 import {
   collection, doc, getDoc, getDocs, addDoc, updateDoc, deleteDoc, query, where, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { loadCaseTypes, getCachedCaseTypes, findCaseTypeById } from './case-types-ui.js?v=0.6.0-t03';
+import { loadCaseTypes, getCachedCaseTypes, findCaseTypeById } from './case-types-ui.js?v=0.6.0-t04';
 import {
   loadClientOrgsAndClients, getCachedClientOrgs, getCachedClientsForOrg, fetchClientsForOrg,
   findClientById, findClientOrgById
-} from './clients-ui.js?v=0.6.0-t03';
+} from './clients-ui.js?v=0.6.0-t04';
 import {
   emptyWorkflow, seedWorkflow, isNodeDone, doneFraction, moveItem, currentPathOf, nodeAtPath, updateAtPath,
   recomputeAdvancement, newTerminalNode
-} from './workflow.js?v=0.6.0-t03';
+} from './workflow.js?v=0.6.0-t04';
 import {
   loadCatalog, actionDefsForContext, actionDefPath, nodeFromActionDef
-} from './catalog-ui.js?v=0.6.0-t03';
+} from './catalog-ui.js?v=0.6.0-t04';
 
 // ---------------------------------------------------------------------
 // Core case/sample/workflow model. Internal to the lab team -- admin has
@@ -1211,19 +1211,23 @@ function buildTerminalActionPanel(c, action, path, samples, isLive) {
   const title = document.createElement('h4'); title.textContent = action.name;
   wrap.appendChild(title);
 
-  if (!isLive) {
-    wrap.appendChild(readonlyNote(action.isDone ? 'Done.' : 'Not done yet.'));
-    return wrap;
-  }
-
   // Terminal action: marked done when needed, that's the entire record --
   // no executor, no timestamp, no verification (SPEC.md's deliberately
-  // thinner audit trail than 0.5.0's Task).
+  // thinner audit trail than 0.5.0's Task). "Mark done" stays interactive
+  // regardless of isLive -- at the user's direct request, so an
+  // already-passed action can still be unticked without needing to
+  // force-jump back to it first. Unticking it here correctly reverts
+  // "current" backward (see workflow.js's bidirectional
+  // recomputeAdvancement) since it's the same saveActionField path either
+  // way. The rest of the panel (zone/sample assignment, parameter values)
+  // stays read-only-elsewhere, per the existing rule.
   const doneLabel = document.createElement('label'); doneLabel.className = 'checkbox-inline';
   const doneInput = document.createElement('input'); doneInput.type = 'checkbox'; doneInput.checked = !!action.isDone;
   doneInput.addEventListener('change', () => saveActionField(c, path, { isDone: doneInput.checked }));
   doneLabel.append(doneInput, ' Mark done');
   wrap.appendChild(doneLabel);
+
+  if (!isLive) return wrap;
 
   wrap.appendChild(buildAssignmentEditor(c, action, path, samples));
 
