@@ -105,25 +105,27 @@ export function updateAtPath(workflowLike, path, updater) {
   return { ...workflowLike, items };
 }
 
-// Advancement (SPEC.md's Open Questions, resolved 2026-09-23 at the
-// user's direct request): current is always the *leftmost not-done item*
-// -- fully derived fresh every time, not just cascaded forward. This
-// makes it bidirectional for free: adding a new (never-done) item before
-// or at the old current position pulls current back to it, and un-marking
-// an already-passed item done pulls current back to that item too. An
-// all-done level's current sits at its last item.
+// Advancement: currentIndex is forward-only bookkeeping (SPEC.md's core
+// rule -- "the moment the current action is done, the workflow
+// auto-advances immediately to the next") used purely to pick a sensible
+// default landing spot when a case is opened fresh; it is deliberately
+// NOT surfaced as a "current" highlight anywhere in the UI anymore (see
+// cases.js), and it deliberately does NOT move backward when an already-
+// passed action gets un-marked done (reverted 2026-09-24 at the user's
+// direct request -- "don't revert back the ui when unticking a node
+// completion": a brief bidirectional-derivation version existed for one
+// pass and was explicitly walked back). Unticking an action only changes
+// that action's own displayed completion percentage; it never moves
+// anything else.
 //
 // `exemptPath`, when given, is the path (relative to this call) to a
 // level whose own currentIndex was just force-set by a long-press
 // override and should be left alone by *this* call -- its own nested
-// children are still recomputed normally underneath it, so it stays
-// internally consistent, but the forced position itself isn't
-// immediately overwritten by the same save that set it. A later,
-// unrelated save (no exemptPath) will still re-derive it normally, so a
-// force-jump is a real but not permanently-sticky override -- it holds
-// until the next real progress/edit anywhere touches this tree. Not
-// asked for explicitly; a judgment call reconciling force-jump with the
-// new bidirectional rule, logged in HANDOFF.md.
+// children are still recomputed normally underneath it. Forward-only
+// cascading already leaves a force-jump *forward* alone on its own (the
+// jumped-to item isn't done yet, so the while loop below simply doesn't
+// fire); `exemptPath` specifically protects a force-jump *backward* from
+// being immediately re-advanced past by this same save.
 export function recomputeAdvancement(workflowLike, exemptPath = null) {
   if (!workflowLike || !workflowLike.items) return;
   const exemptHere = !!exemptPath && exemptPath.length === 0;
@@ -134,9 +136,13 @@ export function recomputeAdvancement(workflowLike, exemptPath = null) {
   });
   if (exemptHere) return;
   if (workflowLike.items.length === 0) { workflowLike.currentIndex = 0; return; }
-  let idx = 0;
-  while (idx < workflowLike.items.length - 1 && isNodeDone(workflowLike.items[idx])) idx++;
-  workflowLike.currentIndex = idx;
+  workflowLike.currentIndex = Math.min(workflowLike.currentIndex || 0, workflowLike.items.length - 1);
+  while (
+    workflowLike.currentIndex < workflowLike.items.length - 1 &&
+    isNodeDone(workflowLike.items[workflowLike.currentIndex])
+  ) {
+    workflowLike.currentIndex++;
+  }
 }
 
 // [doneCount, totalCount] of terminal actions nested anywhere under a

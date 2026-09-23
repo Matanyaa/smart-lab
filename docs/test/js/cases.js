@@ -1,19 +1,19 @@
-import { db } from './firebase-init.js?v=0.6.0-t04';
+import { db } from './firebase-init.js?v=0.6.0-t05';
 import {
   collection, doc, getDoc, getDocs, addDoc, updateDoc, deleteDoc, query, where, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { loadCaseTypes, getCachedCaseTypes, findCaseTypeById } from './case-types-ui.js?v=0.6.0-t04';
+import { loadCaseTypes, getCachedCaseTypes, findCaseTypeById } from './case-types-ui.js?v=0.6.0-t05';
 import {
   loadClientOrgsAndClients, getCachedClientOrgs, getCachedClientsForOrg, fetchClientsForOrg,
   findClientById, findClientOrgById
-} from './clients-ui.js?v=0.6.0-t04';
+} from './clients-ui.js?v=0.6.0-t05';
 import {
   emptyWorkflow, seedWorkflow, isNodeDone, doneFraction, moveItem, currentPathOf, nodeAtPath, updateAtPath,
   recomputeAdvancement, newTerminalNode
-} from './workflow.js?v=0.6.0-t04';
+} from './workflow.js?v=0.6.0-t05';
 import {
   loadCatalog, actionDefsForContext, actionDefPath, nodeFromActionDef
-} from './catalog-ui.js?v=0.6.0-t04';
+} from './catalog-ui.js?v=0.6.0-t05';
 
 // ---------------------------------------------------------------------
 // Core case/sample/workflow model. Internal to the lab team -- admin has
@@ -830,44 +830,48 @@ function buildWorkflowLevel(c, workflowLike, ancestorPath, samples, ancestorLive
 
   const flow = document.createElement('div'); flow.className = 'stage-flow';
 
+  // No "current" concept is surfaced in this circle strip at all (removed
+  // 2026-09-24 at the user's direct request) -- every node just shows its
+  // own actual completion state, independent of position. `currentIndex`
+  // still exists underneath (forward-only bookkeeping, see workflow.js)
+  // purely to pick a sensible default `viewedIdx` when nothing's been
+  // explicitly clicked into yet -- it's never highlighted, and unticking
+  // an action never moves it backward or visibly reverts anything here.
   workflowLike.items.forEach((node, idx) => {
     if (idx > 0) {
       const line = document.createElement('div');
       line.className = 'stage-flow-line';
-      if (idx <= realCurrentIdx) line.classList.add('done');
+      if (isNodeDone(workflowLike.items[idx - 1])) line.classList.add('done');
       flow.appendChild(line);
     }
     const nodePath = [...ancestorPath, idx];
     const btn = document.createElement('button');
     btn.type = 'button'; btn.className = 'stage-flow-node';
-    const isDone = idx < realCurrentIdx || (idx === realCurrentIdx && isNodeDone(node));
-    if (isDone) btn.classList.add('done');
-    if (idx === realCurrentIdx) btn.classList.add('current');
     if (idx === viewedIdx) btn.classList.add('viewed');
 
-    // Containers show their own partial-completion progress -- an "x/y"
-    // count of done terminal descendants, plus a proportional conic-
-    // gradient fill for a genuinely partial state (0% and 100% just rely
-    // on the plain .done styling below, no gradient needed there).
     const nameEl = document.createElement('div');
     nameEl.textContent = node.name;
     btn.appendChild(nameEl);
-    if (node.kind === 'container') {
-      const [doneCount, totalCount] = doneFraction(node);
-      if (totalCount > 0) {
-        const progEl = document.createElement('div');
-        progEl.className = 'stage-flow-node-progress';
-        progEl.textContent = `${doneCount}/${totalCount}`;
-        btn.appendChild(progEl);
-        if (doneCount > 0 && doneCount < totalCount) {
-          const pct = Math.round((doneCount / totalCount) * 100);
-          btn.style.background = `conic-gradient(var(--accent-dim) ${pct}%, var(--panel2) ${pct}% 100%)`;
-        }
-      }
+
+    // Every node -- terminal or container -- just shows its own
+    // completion percentage: solid fill once fully done, a proportional
+    // conic-gradient fill in between, plain/unfilled at 0%. Containers
+    // also get an "x/y" count of their done terminal descendants; a
+    // terminal is trivially 0% or 100%, so no fraction label needed there.
+    const [doneCount, totalCount] = doneFraction(node);
+    if (totalCount > 0 && doneCount === totalCount) btn.classList.add('done');
+    if (node.kind === 'container' && totalCount > 0) {
+      const progEl = document.createElement('div');
+      progEl.className = 'stage-flow-node-progress';
+      progEl.textContent = `${doneCount}/${totalCount}`;
+      btn.appendChild(progEl);
+    }
+    if (totalCount > 0 && doneCount > 0 && doneCount < totalCount) {
+      const pct = Math.round((doneCount / totalCount) * 100);
+      btn.style.background = `conic-gradient(var(--accent-dim) ${pct}%, var(--panel2) ${pct}% 100%)`;
     }
 
-    btn.title = node.name + (idx === realCurrentIdx ? ' (current -- long-press/right-click any circle to force-jump)' : '');
-    if (idx === realCurrentIdx) btn.setAttribute('aria-current', 'step');
+    btn.title = node.name;
     btn.addEventListener('click', () => { viewedPath = nodePath; renderCaseDetail(c.id); });
     attachForceJump(btn, flow, c, ancestorPath, idx, node.name);
     flow.appendChild(btn);
@@ -1216,11 +1220,12 @@ function buildTerminalActionPanel(c, action, path, samples, isLive) {
   // thinner audit trail than 0.5.0's Task). "Mark done" stays interactive
   // regardless of isLive -- at the user's direct request, so an
   // already-passed action can still be unticked without needing to
-  // force-jump back to it first. Unticking it here correctly reverts
-  // "current" backward (see workflow.js's bidirectional
-  // recomputeAdvancement) since it's the same saveActionField path either
-  // way. The rest of the panel (zone/sample assignment, parameter values)
-  // stays read-only-elsewhere, per the existing rule.
+  // force-jump back to it first. Ticking/unticking only changes this
+  // action's own displayed completion state (see buildWorkflowLevel) --
+  // it never moves "current" or visibly reverts anything else in the UI
+  // (workflow.js's recomputeAdvancement is forward-only bookkeeping, not
+  // surfaced here at all). The rest of the panel (zone/sample assignment,
+  // parameter values) stays read-only-elsewhere, per the existing rule.
   const doneLabel = document.createElement('label'); doneLabel.className = 'checkbox-inline';
   const doneInput = document.createElement('input'); doneInput.type = 'checkbox'; doneInput.checked = !!action.isDone;
   doneInput.addEventListener('change', () => saveActionField(c, path, { isDone: doneInput.checked }));

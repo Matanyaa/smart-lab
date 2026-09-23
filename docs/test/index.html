@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Smart Lab (Test)</title>
-<link rel="icon" type="image/svg+xml" href="icon.svg?v=0.6.0-t04">
+<link rel="icon" type="image/svg+xml" href="icon.svg?v=0.6.0-t05">
 <meta name="theme-color" content="#141a1f">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -166,13 +166,12 @@
   }
   .stage-flow-node:hover{border-color:var(--accent-dim);}
   /* Done: actually filled/colored, not just border-tinted, so it reads at
-     a glance. Current: a thicker ring instead of a fill, so "done" and
-     "current" stay visually distinct even when the same circle is both
-     (an all-done workflow's last, current item). */
+     a glance -- purely a function of each node's own completion state, no
+     "current" concept in this UI at all (2026-09-24, at the user's direct
+     request). "Viewed" (what you're currently looking at, via a plain
+     tap) is the only highlight left -- a ring, distinct from the fill. */
   .stage-flow-node.done{background:var(--accent-dim); border-color:var(--accent-dim); color:var(--accent-text);}
-  .stage-flow-node.current{border-width:4px; border-color:var(--accent); color:var(--text); font-weight:600;}
-  .stage-flow-node.current.done{color:var(--accent-text);}
-  .stage-flow-node.viewed:not(.current){box-shadow:0 0 0 2px var(--panel), 0 0 0 4px var(--accent);}
+  .stage-flow-node.viewed{box-shadow:0 0 0 2px var(--panel), 0 0 0 4px var(--accent);}
   .stage-flow-node-progress{font-size:8px; opacity:0.85;}
   .stage-flow-line{flex:1; height:2px; min-width:14px; background:var(--border-soft);}
   .stage-flow-line.done{background:var(--accent-dim);}
@@ -220,7 +219,7 @@
   .task-execute-form .field{margin-bottom:10px;}
   .task-assignment{margin:10px 0;}
 
-  /* 0.6.0-t04: Workflow admin tab -- reusable Action/Task catalog. */
+  /* 0.6.0-t05: Workflow admin tab -- reusable Action/Task catalog. */
   .workflow-catalog-section{margin-top:22px;}
   .workflow-catalog-section:first-of-type{margin-top:14px;}
   .workflow-catalog-section h3{margin:0 0 10px; font-size:14px;}
@@ -237,7 +236,7 @@
 
 <header>
   <div class="brand-block" id="headerLogo">
-    <img src="icon.svg?v=0.6.0-t04" alt="">
+    <img src="icon.svg?v=0.6.0-t05" alt="">
     <div class="brand-text">
       <h1>smart-lab</h1>
       <span class="version-sub" id="versionBadge"></span>
@@ -498,13 +497,13 @@
   </div>
 </div>
 
-<script type="module" src="js/auth-ui.js?v=0.6.0-t04"></script>
-<script type="module" src="js/admin-ui.js?v=0.6.0-t04"></script>
-<script type="module" src="js/case-types-ui.js?v=0.6.0-t04"></script>
-<script type="module" src="js/clients-ui.js?v=0.6.0-t04"></script>
-<script type="module" src="js/cases.js?v=0.6.0-t04"></script>
-<script type="module" src="js/client-view.js?v=0.6.0-t04"></script>
-<script type="module" src="js/update-banner.js?v=0.6.0-t04"></script>
-<script type="module" src="js/changelog.js?v=0.6.0-t04"></script>
+<script type="module" src="js/auth-ui.js?v=0.6.0-t05"></script>
+<script type="module" src="js/admin-ui.js?v=0.6.0-t05"></script>
+<script type="module" src="js/case-types-ui.js?v=0.6.0-t05"></script>
+<script type="module" src="js/clients-ui.js?v=0.6.0-t05"></script>
+<script type="module" src="js/cases.js?v=0.6.0-t05"></script>
+<script type="module" src="js/client-view.js?v=0.6.0-t05"></script>
+<script type="module" src="js/update-banner.js?v=0.6.0-t05"></script>
+<script type="module" src="js/changelog.js?v=0.6.0-t05"></script>
 </body>
 </html>

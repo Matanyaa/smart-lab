@@ -1,4 +1,4 @@
-import { APP_VERSION } from './firebase-init.js?v=0.6.0-t04';
+import { APP_VERSION } from './firebase-init.js?v=0.6.0-t05';
 
 // Plain-language, user-facing history -- distinct from SPEC.md's Decisions
 // Log (design/build rationale) and HANDOFF.md (Claude Code's build notes).
@@ -56,10 +56,8 @@ const CHANGELOG = [
       'Case view: a case\'s own Workflow can now be edited in place (new Edit icon next to "Workflow") -- add or remove steps, rename one, or insert one from the catalog, without waiting on the case type\'s template.',
       'New "+ Sub-action" button on any step -- turns it into a container holding its own nested steps (e.g. adding "Draft" inside "Writing"), right from the case view or the case type\'s template editor.',
       'Steps can be reordered by dragging, or with ↑/↓, while editing.',
-      'Done steps are now filled with color; the current step gets a thicker outline instead.',
-      'A container step partway done now shows how many of its steps are finished (e.g. "2/5") and fills in proportionally.',
-      'The workflow now reverts automatically when it should: adding a new step to an already-finished workflow, or un-marking a step done, moves "current" back to the right place -- not just forward anymore.',
-      'The "Mark done" checkbox now works on any step, not just the current one -- so an already-passed step can be unticked without jumping back to it first.'
+      'Each step now just shows its own progress: done steps are filled solid, a partly-done container fills proportionally and shows a count (e.g. "2/5"). There\'s no separate "current step" highlight anymore -- tap any step to look at it.',
+      'The "Mark done" checkbox works on any step, not just the next one due -- so an already-passed step can be ticked or unticked freely, without needing to jump back to it first. Unticking a step only changes that step\'s own display -- it doesn\'t move or revert anything else.'
     ]
   }
 ];
