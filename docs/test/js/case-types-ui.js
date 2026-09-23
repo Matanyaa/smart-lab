@@ -1,8 +1,9 @@
-import { db } from './firebase-init.js?v=0.5.0-t01';
+import { db } from './firebase-init.js?v=0.5.0-t02';
 import {
   doc, updateDoc, deleteDoc, collection, getDocs, addDoc
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { newTaskNode, newActionNode, emptyWorkflow, updateAtPath } from './workflow.js?v=0.5.0-t01';
+import { newTaskNode, newActionNode, emptyWorkflow, updateAtPath } from './workflow.js?v=0.5.0-t02';
+import { loadCatalog, getCachedActionDefs, getCachedTaskDefs, actionDefPath, nodeFromActionDef, nodeFromTaskDef } from './catalog-ui.js?v=0.5.0-t02';
 
 // ---------------------------------------------------------------------
 // Admin: case type CRUD, plus the 0.5.0 Workflow-template authoring
@@ -11,8 +12,11 @@ import { newTaskNode, newActionNode, emptyWorkflow, updateAtPath } from './workf
 // "Seed default workflow" checkbox that stood in for a real editor) is
 // what a new case's own Workflow gets deep-copied from at creation --
 // see cases.js/workflow.js. Phase 1 per TASK.md: plain top-to-bottom
-// add/remove/edit, no drag-reorder, no reusable action/task catalog --
-// those are an explicit follow-up.
+// add/remove/edit, no drag-reorder. 0.5.0-t02 added the reusable Action/Task
+// catalog (catalog-ui.js, the new admin Workflow tab) -- every level of
+// this editor now also offers "+ From catalog" alongside "+ Task"/
+// "+ Action", inserting a copy of a catalog definition (see
+// buildCatalogPicker below).
 // ---------------------------------------------------------------------
 const addCaseTypeForm = document.getElementById('addCaseTypeForm');
 const addCaseTypeError = document.getElementById('addCaseTypeError');
@@ -40,7 +44,10 @@ export function findCaseTypeById(id) {
 }
 
 export async function renderCaseTypeList() {
-  await loadCaseTypes();
+  // The catalog picker (buildCatalogPicker below) needs actionDefs/
+  // taskDefs loaded regardless of whether the admin has visited the
+  // Workflow tab yet this session.
+  await Promise.all([loadCaseTypes(), loadCatalog()]);
   caseTypeListBody.innerHTML = '';
   if (caseTypes.length === 0) {
     caseTypeListBody.innerHTML = '<tr><td colspan="3" class="muted">No case types yet.</td></tr>';
@@ -143,8 +150,44 @@ function buildItemsEditor(ct, path, workflowLike) {
   addActionBtn.addEventListener('click', () => addNode(ct, path, newActionNode('New action')));
   addRow.append(addTaskBtn, addActionBtn);
   wrap.appendChild(addRow);
+  wrap.appendChild(buildCatalogPicker(ct, path));
 
   return wrap;
+}
+
+// Picks an existing catalog Action/Task definition (see catalog-ui.js) and
+// inserts a fresh copy of it at this level -- picking an action brings its
+// whole catalog subtree along (nested action/task defs), since that's the
+// point of defining "Make sample" once under "Lab" rather than rebuilding
+// it inline in every case type.
+function buildCatalogPicker(ct, path) {
+  const row = document.createElement('div'); row.className = 'catalog-picker-row';
+  const select = document.createElement('select');
+  const blankOpt = document.createElement('option'); blankOpt.value = ''; blankOpt.textContent = '(pick from catalog)';
+  select.appendChild(blankOpt);
+  getCachedActionDefs().forEach((a) => {
+    const opt = document.createElement('option');
+    opt.value = `action:${a.id}`; opt.textContent = `Action: ${actionDefPath(a.id)}`;
+    select.appendChild(opt);
+  });
+  getCachedTaskDefs().forEach((t) => {
+    const opt = document.createElement('option');
+    opt.value = `task:${t.id}`;
+    opt.textContent = `Task: ${t.parentId ? actionDefPath(t.parentId) + ' > ' + t.name : t.name}`;
+    select.appendChild(opt);
+  });
+
+  const insertBtn = document.createElement('button');
+  insertBtn.type = 'button'; insertBtn.className = 'btn btn-small'; insertBtn.textContent = '+ From catalog';
+  insertBtn.addEventListener('click', () => {
+    if (!select.value) return;
+    const [kind, id] = select.value.split(':');
+    const node = kind === 'action' ? nodeFromActionDef(id) : nodeFromTaskDef(id);
+    if (node) addNode(ct, path, node);
+  });
+
+  row.append(select, insertBtn);
+  return row;
 }
 
 async function addNode(ct, path, node) {

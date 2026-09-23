@@ -82,8 +82,19 @@ service cloud.firestore {
       allow read: if isSignedIn();
       allow write: if isAdmin();
     }
+    // 0.5.1: reusable Action/Task catalog (see workflow.js/catalog-ui.js) --
+    // admin-only both ways, narrower than caseTypes/clientOrgs/clients
+    // above, since the only thing reading it right now is the admin-only
+    // case-type Workflow editor's "+ From catalog" picker, not any
+    // staff-facing screen. Widen to isStaff() read if that changes.
+    match /actionDefs/{actionDefId} {
+      allow read, write: if isAdmin();
+    }
+    match /taskDefs/{taskDefId} {
+      allow read, write: if isAdmin();
+    }
 
-    // 2026-09-22: `docs/test/` now reads/writes these same six collections
+    // 2026-09-22: `docs/test/` now reads/writes these same collections
     // under a `test_` prefix instead (see CLAUDE.md's "Environments" /
     // SPEC.md's Decisions Log) -- `users`/`usernames` stay shared/
     // unprefixed on purpose, unlike these. Rules below are the exact same
@@ -102,6 +113,12 @@ service cloud.firestore {
     match /test_clients/{clientId} {
       allow read: if isSignedIn();
       allow write: if isAdmin();
+    }
+    match /test_actionDefs/{actionDefId} {
+      allow read, write: if isAdmin();
+    }
+    match /test_taskDefs/{taskDefId} {
+      allow read, write: if isAdmin();
     }
 
     match /cases/{caseId} {
