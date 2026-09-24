@@ -1,19 +1,19 @@
-import { db } from './firebase-init.js?v=0.6.0-t06';
+import { db } from './firebase-init.js?v=0.6.0-t07';
 import {
   collection, doc, getDoc, getDocs, addDoc, updateDoc, deleteDoc, query, where, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { loadCaseTypes, getCachedCaseTypes, findCaseTypeById } from './case-types-ui.js?v=0.6.0-t06';
+import { loadCaseTypes, getCachedCaseTypes, findCaseTypeById } from './case-types-ui.js?v=0.6.0-t07';
 import {
   loadClientOrgsAndClients, getCachedClientOrgs, getCachedClientsForOrg, fetchClientsForOrg,
   findClientById, findClientOrgById
-} from './clients-ui.js?v=0.6.0-t06';
+} from './clients-ui.js?v=0.6.0-t07';
 import {
   emptyWorkflow, seedWorkflow, isNodeDone, doneFraction, moveItem, currentPathOf, nodeAtPath, updateAtPath,
   recomputeAdvancement, newTerminalNode
-} from './workflow.js?v=0.6.0-t06';
+} from './workflow.js?v=0.6.0-t07';
 import {
   loadCatalog, actionDefsForContext, actionDefPath, nodeFromActionDef
-} from './catalog-ui.js?v=0.6.0-t06';
+} from './catalog-ui.js?v=0.6.0-t07';
 
 // ---------------------------------------------------------------------
 // Core case/sample/workflow model. Internal to the lab team -- admin has

@@ -1,12 +1,12 @@
-import { auth, db, USERNAME_DOMAIN } from './firebase-init.js?v=0.6.0-t06';
+import { auth, db, USERNAME_DOMAIN } from './firebase-init.js?v=0.6.0-t07';
 import {
   signInWithEmailAndPassword, signOut, onAuthStateChanged,
   updatePassword, reauthenticateWithCredential, EmailAuthProvider
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
 import { doc, getDoc } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { loadUserList } from './admin-ui.js?v=0.6.0-t06';
-import { showCasesScreen, hideCasesScreen } from './cases.js?v=0.6.0-t06';
-import { showClientView, hideClientView } from './client-view.js?v=0.6.0-t06';
+import { loadUserList } from './admin-ui.js?v=0.6.0-t07';
+import { showCasesScreen, hideCasesScreen } from './cases.js?v=0.6.0-t07';
+import { showClientView, hideClientView } from './client-view.js?v=0.6.0-t07';
 
 const loginScreen = document.getElementById('loginScreen');
 const settingsScreen = document.getElementById('settingsScreen');
@@ -30,24 +30,34 @@ settingsBtn.addEventListener('click', () => {
 
 // Jump from docs/test/ to the launched app at docs/ -- a deliberate
 // non-primary gesture (right-click on desktop, long-press on phone) so
-// it's never triggered by an ordinary tap/click on the logo. Fixed
-// 2026-09-24: on a real phone this silently did nothing -- iOS/Android's
-// own long-press handling on the logo <img> (their "save/copy image"
-// callout) was winning the race against this timer and eating the touch
-// before it ever fired. `-webkit-touch-callout:none` etc. on the logo in
-// index.html's CSS stops the native gesture from appearing at all; calling
-// preventDefault() here too (non-passive) belt-and-suspenders that against
-// browsers that still try to start their own gesture recognition on the
-// image (Android's included).
+// it's never triggered by an ordinary tap/click on the logo.
+//
+// 2026-09-24: two things fixed after the user reported this still didn't
+// work even after the first (touch-callout CSS + preventDefault) pass:
+// 1. The touchstart handler is back to the EXACT same shape as docs/'s own
+//    already-working reverse gesture (no preventDefault/passive:false) --
+//    that first pass's preventDefault() addition was a guess, unproven,
+//    and not present in the one direction actually confirmed working by
+//    the user, so it's removed rather than kept as an unproven "extra
+//    layer." The touch-callout CSS in index.html stays -- harmless either
+//    way, and still plausibly relevant on some devices.
+// 2. The destination is now an absolute path (`/smart-lab/`) instead of
+//    the relative `../`. A relative `../` only resolves correctly if the
+//    browser's current address bar path genuinely ends in `/test/` (with
+//    the trailing slash) at the moment of navigation -- true after a
+//    normal page load, but docs/test/ is bookmark-only (not an installed
+//    PWA, see CLAUDE.md), so a bookmark saved without the trailing slash,
+//    or any other path oddity, would make `../` resolve one level too far
+//    up and silently go nowhere useful. An absolute path sidesteps that
+//    entirely regardless of how the page was reached.
 headerLogo.addEventListener('contextmenu', (e) => {
   e.preventDefault();
-  location.href = '../';
+  location.href = '/smart-lab/';
 });
 let logoPressTimer = null;
-headerLogo.addEventListener('touchstart', (e) => {
-  e.preventDefault();
-  logoPressTimer = setTimeout(() => { location.href = '../'; }, 600);
-}, { passive: false });
+headerLogo.addEventListener('touchstart', () => {
+  logoPressTimer = setTimeout(() => { location.href = '/smart-lab/'; }, 600);
+});
 ['touchend', 'touchmove', 'touchcancel'].forEach((evt) => {
   headerLogo.addEventListener(evt, () => clearTimeout(logoPressTimer));
 });
