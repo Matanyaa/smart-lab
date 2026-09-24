@@ -1,28 +1,43 @@
-import { db } from './firebase-init.js?v=0.4.2';
+import { db } from './firebase-init.js?v=1.0.0';
 import {
   collection, doc, getDoc, getDocs, addDoc, updateDoc, deleteDoc, query, where, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { loadCaseTypes, getCachedCaseTypes, findCaseTypeById } from './case-types-ui.js?v=0.4.2';
+import { loadCaseTypes, getCachedCaseTypes, findCaseTypeById } from './case-types-ui.js?v=1.0.0';
 import {
   loadClientOrgsAndClients, getCachedClientOrgs, getCachedClientsForOrg, fetchClientsForOrg,
   findClientById, findClientOrgById
-} from './clients-ui.js?v=0.4.2';
+} from './clients-ui.js?v=1.0.0';
+import {
+  emptyWorkflow, seedWorkflow, isNodeDone, doneFraction, moveItem, currentPathOf, nodeAtPath, updateAtPath,
+  recomputeAdvancement, newTerminalNode
+} from './workflow.js?v=1.0.0';
+import {
+  loadCatalog, actionDefsForContext, actionDefPath, nodeFromActionDef
+} from './catalog-ui.js?v=1.0.0';
 
 // ---------------------------------------------------------------------
-// Core case/sample/action model (0.4.1 redesign -- see SPEC.md's "Case
-// lifecycle" / "Case model"). Internal to the lab team -- admin has zero
-// rule-level access to any of this now (see setup/firestore.rules), and
-// clients get their own, separately-scoped read-only view (client-view.js).
+// Core case/sample/workflow model. Internal to the lab team -- admin has
+// zero rule-level access to any of this now (see setup/firestore.rules),
+// and clients get their own, separately-scoped read-only view
+// (client-view.js). 0.5.0 replaced the fixed new/lab/write/archive/done
+// stage enum and per-sample actions with the generic Workflow/Action/Task
+// primitive (see workflow.js and SPEC.md's "The Workflow / Action / Task
+// primitive") -- a case now has one top-level Workflow, and samples are
+// pure item/zone/name structure with no actions of their own (a task gets
+// tagged with which sample(s)/zone(s) it applies to live, at execution
+// time, not the other way around).
 // ---------------------------------------------------------------------
 
 const casesScreen = document.getElementById('casesScreen');
 const caseDetailScreen = document.getElementById('caseDetailScreen');
-const caseListBody = document.getElementById('caseListBody');
+const caseTypeGroupsContainer = document.getElementById('caseTypeGroups');
 const showNewCaseFormBtn = document.getElementById('showNewCaseFormBtn');
 const newCaseForm = document.getElementById('newCaseForm');
 const newCaseError = document.getElementById('newCaseError');
 const backToCasesBtn = document.getElementById('backToCasesBtn');
 const toggleNotesBtn = document.getElementById('toggleNotesBtn');
+const editInfoBtn = document.getElementById('editInfoBtn');
+const deleteCaseBtn = document.getElementById('deleteCaseBtn');
 const caseDetailTitle = document.getElementById('caseDetailTitle');
 const caseMainView = document.getElementById('caseMainView');
 const caseNotesView = document.getElementById('caseNotesView');
@@ -32,11 +47,18 @@ const newCaseClientSelect = document.getElementById('newCaseClient');
 const newCaseTypeSelect = document.getElementById('newCaseType');
 const newCaseManagerSelect = document.getElementById('newCaseManager');
 
+const TRASH_ICON_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6M14 11v6"></path><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path></svg>`;
+const DUPLICATE_ICON_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`;
+const EDIT_ICON_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>`;
+
 let myProfile = null; // { uid, username, role }
 let cases = [];
 let infoEditMode = false;
 let expandedSamples = new Set();
+let editingSamples = new Set();
 let notesShown = false;
+let viewedPath = null; // null = follow the workflow's real current path (see workflow.js's currentPathOf)
+let workflowEditMode = false;
 
 export function hideCasesScreen() {
   casesScreen.classList.add('hidden');
@@ -149,10 +171,6 @@ newCaseClientOrgSelect.addEventListener('change', async () => {
   });
 });
 
-function defaultArchivingWorkflow(template) {
-  return (template || []).map((item) => ({ name: item.name, order: item.order, status: 'pending', executedBy: null, executedAt: null }));
-}
-
 newCaseForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   newCaseError.textContent = '';
@@ -175,17 +193,17 @@ newCaseForm.addEventListener('submit', async (e) => {
       caseManager: newCaseManagerSelect.value || null,
       openedBy: myProfile.username,
       caseType: newCaseTypeSelect.value || null,
-      stage: 'new',
-      writingStage: null,
       onHold: false,
       highPriority: false,
       showResearchToClient: false,
       dueDateOverride: null,
-      // Snapshotted from the case type at creation time -- a later edit or
-      // deletion of the case type itself doesn't retroactively change an
-      // already-created case's own workflow content.
-      labWorkflowTemplate: caseType ? (caseType.labWorkflowTemplate || []) : [],
-      archivingWorkflow: defaultArchivingWorkflow(caseType ? caseType.archivingWorkflowTemplate : [])
+      // 0.5.0: replaces stage/writingStage/labWorkflowTemplate/
+      // archivingWorkflow entirely -- a case now has exactly one top-level
+      // Workflow, deep-copied from its case type's authored template at
+      // creation time (empty if the case type has none, or none picked).
+      // A later edit to the case type itself doesn't retroactively change
+      // an already-created case's own copy.
+      workflow: seedWorkflow(caseType ? caseType.workflowTemplate : null)
     });
     newCaseForm.reset();
     newCaseForm.classList.add('hidden');
@@ -196,14 +214,6 @@ newCaseForm.addEventListener('submit', async (e) => {
     newCaseError.textContent = `Couldn't create case: ${err.message}`;
   }
 });
-
-const STAGE_LABELS = { new: 'New', lab: 'Lab', write: 'Write', archive: 'Archive', done: 'Done' };
-function stageLabel(stage) { return STAGE_LABELS[stage] || stage; }
-
-const WRITING_LABELS = {
-  draft: 'Draft', leaderReview: 'Leader review', secondDraft: 'Second draft',
-  orgManagerReview: 'Org manager review', published: 'Published'
-};
 
 // ---------------------------------------------------------------------
 // Derived display fields -- see SPEC.md's "Case model" > "Derived /
@@ -227,33 +237,60 @@ function dueDateOf(c) {
   d.setDate(d.getDate() + ct.tatGoalDays);
   return d.toISOString().slice(0, 10);
 }
-function caseTitle(c) {
+// 0.5.0: there's no fixed stage enum anymore -- a case's "stage" is just
+// whichever top-level Workflow item its workflow.currentIndex points at,
+// named however admin named it (see workflow.js's currentPathOf/
+// recomputeAdvancement).
+function currentTopLevelLabel(c) {
+  const items = (c.workflow && c.workflow.items) || [];
+  if (items.length === 0) return 'No workflow';
+  const idx = Math.min(c.workflow.currentIndex || 0, items.length - 1);
+  return items[idx].name;
+}
+// On-hold/research act as the status itself (replacing the plain stage
+// name) rather than separate tags -- at the user's request, since a case
+// that's on hold or under research isn't really "in New/Lab/..." in any
+// way worth showing alongside a hold/research flag. High priority doesn't
+// replace the status, just marks it with a star. On hold wins if a case
+// is somehow both on hold and flagged for research, since "on hold" is
+// the more blocking of the two states.
+function effectiveStatusText(c) {
+  const base = c.onHold ? 'On hold' : c.showResearchToClient ? 'Research' : currentTopLevelLabel(c);
+  return c.highPriority ? `★ ${base}` : base;
+}
+// Header format (0.4.2, revised at the user's direct correction -- the
+// "."s in their original shorthand meant line breaks, not literal
+// separators on one line): three lines -- title; day, date, status;
+// client -- rendered as separate elements, not periods on a single line.
+// Third line has no "Client" label, just org - client (clientDisplayText,
+// already used for the same pairing in the compact Info row). Case
+// manager still dropped from the header entirely (see prior HANDOFF.md
+// entry) -- still editable via the Info section.
+function caseHeaderLines(c) {
   const dc = dayCounterOf(c);
-  const parts = [
-    onameOf(c) || '(unnamed)',
-    c.caseManager || 'Unassigned',
-    dc == null ? '—' : `day ${dc}`,
-    dueDateOf(c) || '—',
-    stageLabel(c.stage)
-  ];
-  return parts.join(' | ');
+  const dayText = dc == null ? '—' : `day ${dc}`;
+  const line2 = [dayText, dueDateOf(c) || '—', effectiveStatusText(c)].join(', ');
+  return [onameOf(c) || '(unnamed)', line2, clientDisplayText(c) || '—'];
 }
 
-// A plain worker executing/verifying the last action on someone else's
-// case can't write to the case document itself under setup/firestore.rules
-// (update = team_leader or that case's own caseManager only, unchanged
-// from Iteration 4 -- see TASK.md's rules section #9). Rather than weaken
-// that rule, stage auto-advances only actually fire when the current user
-// is allowed to; otherwise they're caught up opportunistically the next
-// time an authorized user (the case's team leader or manager) opens the
-// case -- see the catch-up call in openCaseDetail. Logged as a judgment
-// call in HANDOFF.md.
+// Gates the case's own info fields (name/dates/client/etc.) and deletion --
+// unchanged in spirit from 0.4.1. Executing/verifying workflow tasks is
+// NOT gated by this (see setup/firestore.rules' new case-update rule):
+// under 0.5.0, a task's fields live inside the case doc's own `workflow`
+// field rather than a separate staff-writable subcollection, so a plain
+// case-staff member who isn't the case manager still needs to be able to
+// write that one field even though they can't touch the rest of the case
+// doc -- the rule allows any case-staff write as long as `workflow` is the
+// only field that changed. This also retires 0.4.1's "auto-advance only
+// fires for whoever's allowed to write the case doc, otherwise it's caught
+// up next time an authorized user opens the case" workaround entirely --
+// every case-staff member can now always save their own advancement.
 function canUpdateCase(c) {
   return myProfile.role === 'team_leader' || c.caseManager === myProfile.username;
 }
 
 async function loadCaseList() {
-  caseListBody.innerHTML = '<tr><td colspan="2" class="muted">Loading…</td></tr>';
+  caseTypeGroupsContainer.innerHTML = '<p class="muted">Loading…</p>';
   const q = myProfile.role === 'team_leader'
     ? query(collection(db, 'cases'), where('openedBy', '==', myProfile.username))
     : collection(db, 'cases');
@@ -261,30 +298,129 @@ async function loadCaseList() {
   cases = [];
   snap.forEach((d) => cases.push({ id: d.id, ...d.data() }));
   cases.sort((a, b) => (a.caseNumber || '').localeCompare(b.caseNumber || ''));
-  caseListBody.innerHTML = '';
-  if (cases.length === 0) {
-    caseListBody.innerHTML = '<tr><td colspan="2" class="muted">No cases yet.</td></tr>';
-    return;
-  }
-  cases.forEach((c) => caseListBody.appendChild(renderCaseRow(c)));
+  renderCaseTypeGroups();
 }
 
-function renderCaseRow(c) {
-  const tr = document.createElement('tr');
-  tr.className = 'case-row';
-  const titleTd = document.createElement('td'); titleTd.textContent = caseTitle(c);
-  const badgeTd = document.createElement('td');
-  if (c.onHold) {
-    const b = document.createElement('span'); b.className = 'badge badge-onhold'; b.textContent = 'On hold';
-    badgeTd.appendChild(b);
+// Cases screen groups by case type (each type gets its own card, titled
+// with the type's own name instead of a generic "Cases" heading) rather
+// than one flat list -- at the user's request. Cases with no case type
+// set land in their own "No case type" group, sorted last.
+function groupCasesByType(caseList) {
+  const groups = new Map();
+  caseList.forEach((c) => {
+    const key = c.caseType || '__none__';
+    if (!groups.has(key)) {
+      const name = c.caseType ? (findCaseTypeById(c.caseType)?.name || 'Unknown type') : 'No case type';
+      groups.set(key, { name, cases: [] });
+    }
+    groups.get(key).cases.push(c);
+  });
+  return groups;
+}
+
+function renderCaseTypeGroups() {
+  caseTypeGroupsContainer.innerHTML = '';
+  if (cases.length === 0) {
+    caseTypeGroupsContainer.innerHTML = '<p class="muted">No cases yet.</p>';
+    return;
   }
-  if (c.highPriority) {
-    const b = document.createElement('span'); b.className = 'badge badge-priority'; b.textContent = 'Priority';
-    badgeTd.appendChild(b);
+  const groups = Array.from(groupCasesByType(cases).values()).sort((a, b) => {
+    if (a.name === 'No case type') return 1;
+    if (b.name === 'No case type') return -1;
+    return a.name.localeCompare(b.name);
+  });
+  groups.forEach((group) => caseTypeGroupsContainer.appendChild(buildTypeCard(group)));
+}
+
+function buildTypeCard(group) {
+  const card = document.createElement('div');
+  card.className = 'card type-card';
+  const h2 = document.createElement('h2');
+  h2.textContent = group.name;
+  card.appendChild(h2);
+  group.cases.forEach((c, idx) => card.appendChild(renderCaseRow(c, idx + 1)));
+  return card;
+}
+
+// Two-line row: top is the numbered oname (case# - client case# - name),
+// bottom splits worker/day-count/due-date (left) from stage (right) --
+// replaces the old single pipe-delimited line. Team leaders also get a
+// delete icon on the row itself (0.4.2), matching the delete control in
+// case view -- same cascade delete, same team_leader-only gating.
+function renderCaseRow(c, number) {
+  const row = document.createElement('div');
+  row.className = 'case-row-item';
+
+  const content = document.createElement('div');
+  content.className = 'case-row-content';
+
+  const top = document.createElement('div');
+  top.className = 'case-row-top';
+  top.textContent = `${number}. ${onameOf(c) || '(unnamed)'}`;
+  // On-hold/priority no longer get separate badges here -- they're folded
+  // into the status text on the right instead (see effectiveStatusText()).
+
+  const bottom = document.createElement('div');
+  bottom.className = 'case-row-bottom';
+
+  const dc = dayCounterOf(c);
+  const meta = document.createElement('div');
+  meta.className = 'case-row-meta';
+  meta.textContent = `${c.caseManager || 'Unassigned'} | ${dc == null ? '—' : `day ${dc}`} | ${dueDateOf(c) || '—'}`;
+
+  const status = document.createElement('div');
+  status.className = 'case-row-status';
+  if (c.highPriority) status.classList.add('status-priority');
+  status.textContent = effectiveStatusText(c);
+
+  bottom.append(meta, status);
+  content.append(top, bottom);
+  row.appendChild(content);
+  row.addEventListener('click', () => openCaseDetail(c.id));
+
+  if (myProfile.role === 'team_leader') {
+    row.appendChild(buildCaseRowDeleteControl(c));
   }
-  tr.append(titleTd, badgeTd);
-  tr.addEventListener('click', () => openCaseDetail(c.id));
-  return tr;
+
+  return row;
+}
+
+function buildCaseRowDeleteControl(c) {
+  const wrap = document.createElement('div');
+  wrap.className = 'case-row-delete';
+  // Swallow all clicks inside (icon, confirm, cancel) so they never bubble
+  // to the row's own click handler and open the case instead.
+  wrap.addEventListener('click', (e) => e.stopPropagation());
+
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'icon-btn icon-btn-danger icon-btn-small';
+  btn.title = 'Delete case'; btn.setAttribute('aria-label', 'Delete case');
+  btn.innerHTML = TRASH_ICON_SVG;
+  wrap.appendChild(btn);
+
+  btn.addEventListener('click', () => {
+    if (wrap.querySelector('.confirm-row')) return;
+    const confirmRow = document.createElement('div');
+    confirmRow.className = 'confirm-row';
+    confirmRow.style.cssText = 'position:absolute; right:0; top:34px; background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:10px; width:220px; z-index:5;';
+    const msg = document.createElement('p'); msg.className = 'error'; msg.style.margin = '0 0 8px';
+    msg.textContent = 'Permanently delete this case?';
+    const confirmBtn = document.createElement('button');
+    confirmBtn.className = 'btn btn-small btn-primary'; confirmBtn.textContent = 'Confirm delete';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'btn btn-small'; cancelBtn.textContent = 'Cancel'; cancelBtn.style.marginLeft = '8px';
+    cancelBtn.addEventListener('click', () => confirmRow.remove());
+    confirmBtn.addEventListener('click', async () => {
+      confirmBtn.disabled = true;
+      await deleteCaseCascade(c.id);
+      await loadCaseList();
+    });
+    confirmRow.append(msg, confirmBtn, cancelBtn);
+    wrap.appendChild(confirmRow);
+  });
+
+  return wrap;
 }
 
 backToCasesBtn.addEventListener('click', () => {
@@ -296,10 +432,48 @@ backToCasesBtn.addEventListener('click', () => {
 toggleNotesBtn.addEventListener('click', async () => {
   notesShown = !notesShown;
   toggleNotesBtn.classList.toggle('active', notesShown);
-  toggleNotesBtn.textContent = notesShown ? 'Back to case' : 'Notes';
+  toggleNotesBtn.title = notesShown ? 'Back to case' : 'Notes';
+  toggleNotesBtn.setAttribute('aria-label', toggleNotesBtn.title);
   caseMainView.classList.toggle('hidden', notesShown);
   caseNotesView.classList.toggle('hidden', !notesShown);
   if (notesShown) await renderNotesView(currentCaseId);
+});
+
+// Edit info now lives in the case-detail header (0.4.2) rather than inline
+// above the Info section -- see buildInfoSection.
+editInfoBtn.addEventListener('click', () => {
+  infoEditMode = !infoEditMode;
+  editInfoBtn.classList.toggle('active', infoEditMode);
+  renderCaseDetail(currentCaseId);
+});
+
+// Case deletion, moved from a text button at the bottom of the workflow
+// section into the header (0.4.2), next to the edit icon. Same cascade
+// delete as before, same team_leader-only gating (enforced both by
+// deleteCaseBtn's visibility below and by setup/firestore.rules).
+deleteCaseBtn.addEventListener('click', () => {
+  const existing = document.getElementById('caseDeleteConfirm');
+  if (existing) { existing.remove(); return; }
+  const bar = document.createElement('div');
+  bar.id = 'caseDeleteConfirm';
+  bar.className = 'confirm-row';
+  bar.style.margin = '0 0 16px';
+  const msg = document.createElement('p'); msg.className = 'error';
+  msg.textContent = 'This permanently deletes the case and everything in it. This cannot be undone.';
+  const confirmBtn = document.createElement('button');
+  confirmBtn.className = 'btn btn-small btn-primary'; confirmBtn.textContent = 'Confirm delete';
+  const cancelBtn = document.createElement('button');
+  cancelBtn.className = 'btn btn-small'; cancelBtn.textContent = 'Cancel'; cancelBtn.style.marginLeft = '8px';
+  cancelBtn.addEventListener('click', () => bar.remove());
+  confirmBtn.addEventListener('click', async () => {
+    confirmBtn.disabled = true;
+    await deleteCaseCascade(currentCaseId);
+    caseDetailScreen.classList.add('hidden');
+    casesScreen.classList.remove('hidden');
+    loadCaseList();
+  });
+  bar.append(msg, confirmBtn, cancelBtn);
+  document.querySelector('.case-detail-header').insertAdjacentElement('afterend', bar);
 });
 
 let currentCaseId = null;
@@ -309,26 +483,27 @@ async function openCaseDetail(caseId) {
   infoEditMode = false;
   expandedSamples = new Set();
   notesShown = false;
+  viewedPath = null;
+  workflowEditMode = false;
   toggleNotesBtn.classList.remove('active');
-  toggleNotesBtn.textContent = 'Notes';
+  toggleNotesBtn.title = 'Notes';
+  toggleNotesBtn.setAttribute('aria-label', 'Notes');
+  editInfoBtn.classList.remove('active');
+  const existingConfirm = document.getElementById('caseDeleteConfirm');
+  if (existingConfirm) existingConfirm.remove();
   caseMainView.classList.remove('hidden');
   caseNotesView.classList.add('hidden');
   casesScreen.classList.add('hidden');
   caseDetailScreen.classList.remove('hidden');
   caseMainView.innerHTML = '<p class="muted">Loading…</p>';
+  // Loaded here (not just lazily by buildWorkflowSection) so the "+ From
+  // catalog" picker in edit mode has data ready the first time it's shown.
+  await loadCatalog();
   await renderCaseDetail(caseId);
 }
 
 async function saveCaseField(caseId, field, value) {
   await updateDoc(doc(db, 'cases', caseId), { [field]: value });
-}
-
-// Catches up any stage transition a plain worker couldn't itself write
-// (see canUpdateCase above), plus runs the ordinary auto-advance checks.
-async function runAutoAdvanceChecks(caseId, c, samples) {
-  if (!canUpdateCase(c)) return;
-  if (c.stage === 'lab') await maybeAutoAdvanceToWrite(caseId, samples);
-  if (c.stage === 'archive') await maybeAutoAdvanceToDone(caseId, c);
 }
 
 async function renderCaseDetail(caseId) {
@@ -338,43 +513,38 @@ async function renderCaseDetail(caseId) {
     return;
   }
   const c = { id: caseId, ...caseSnap.data() };
+  if (!c.workflow) c.workflow = emptyWorkflow();
 
+  // 0.5.0: samples no longer have their own actions subcollection -- a
+  // task gets tagged against sample(s)/zone(s) live, from inside the
+  // workflow section, instead of a sample owning its own action list. No
+  // more N+1 per-sample fetch here either.
   const samplesSnap = await getDocs(collection(db, 'cases', caseId, 'samples'));
   const samples = [];
-  for (const sDoc of samplesSnap.docs) {
-    const actionsSnap = await getDocs(collection(db, 'cases', caseId, 'samples', sDoc.id, 'actions'));
-    const actions = [];
-    actionsSnap.forEach((aDoc) => actions.push({ id: aDoc.id, ...aDoc.data() }));
-    samples.push({ id: sDoc.id, ...sDoc.data(), actions });
-  }
+  samplesSnap.forEach((sDoc) => samples.push({ id: sDoc.id, ...sDoc.data() }));
   samples.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 
-  await runAutoAdvanceChecks(caseId, c, samples);
-  // Re-read after a possible auto-advance so the rendered stage is current.
-  const freshSnap = await getDoc(doc(db, 'cases', caseId));
-  const cFresh = { id: caseId, ...freshSnap.data() };
-
-  caseDetailTitle.textContent = caseTitle(cFresh);
+  caseDetailTitle.innerHTML = '';
+  caseHeaderLines(c).forEach((line) => {
+    const lineEl = document.createElement('div');
+    lineEl.textContent = line;
+    caseDetailTitle.appendChild(lineEl);
+  });
+  editInfoBtn.classList.toggle('hidden', !canUpdateCase(c));
+  editInfoBtn.classList.toggle('active', infoEditMode);
+  deleteCaseBtn.classList.toggle('hidden', myProfile.role !== 'team_leader');
   caseMainView.innerHTML = '';
-  caseMainView.appendChild(buildInfoSection(cFresh));
-  caseMainView.appendChild(buildWorkflowSection(cFresh, samples));
-  caseMainView.appendChild(buildSamplesSection(cFresh, samples));
+  const infoSection = buildInfoSection(c);
+  if (infoSection) caseMainView.appendChild(infoSection);
+  caseMainView.appendChild(buildWorkflowSection(c, samples));
+  caseMainView.appendChild(buildSamplesSection(c, samples));
 }
 
 // ---------------------------------------------------------------------
-// Info section -- compact (default) vs full/editable, toggled via a
-// plain "Edit info" button. Scope is the case's own info fields only,
-// never samples or workflow (see SPEC.md's "Case info display").
+// Info section -- compact (default) vs full/editable, toggled via the
+// header's edit icon (editInfoBtn). Scope is the case's own info fields
+// only, never samples or workflow (see SPEC.md's "Case info display").
 // ---------------------------------------------------------------------
-function infoRow(label, valueText) {
-  const row = document.createElement('div');
-  row.className = 'case-field';
-  const l = document.createElement('label'); l.textContent = label;
-  const v = document.createElement('div'); v.textContent = valueText || '—';
-  row.append(l, v);
-  return row;
-}
-
 function clientDisplayText(c) {
   if (!c.client) return null;
   const client = findClientById(c.client);
@@ -384,51 +554,29 @@ function clientDisplayText(c) {
 }
 
 function buildInfoSection(c) {
-  const section = document.createElement('div');
-  section.className = 'case-section';
-  const h3 = document.createElement('h3');
-  h3.textContent = 'Info';
-  const editBtn = document.createElement('button');
-  editBtn.type = 'button';
-  editBtn.className = 'btn btn-small';
-  editBtn.textContent = infoEditMode ? 'Done editing' : 'Edit info';
-  editBtn.addEventListener('click', () => { infoEditMode = !infoEditMode; renderCaseDetail(c.id); });
-  h3.appendChild(editBtn);
-  section.appendChild(h3);
-
   const canEdit = myProfile.role === 'team_leader' || c.caseManager === myProfile.username;
 
-  if (!infoEditMode || !canEdit) {
-    const grid = document.createElement('div');
-    grid.className = 'case-grid';
-    grid.appendChild(infoRow('Case number', c.caseNumber));
-    grid.appendChild(infoRow('Client case number', c.clientCaseNumber));
-    grid.appendChild(infoRow('Name', c.name));
-    grid.appendChild(infoRow('Client', clientDisplayText(c)));
-    grid.appendChild(infoRow('Start date', c.startDate));
-    grid.appendChild(infoRow('Case type', c.caseType ? (findCaseTypeById(c.caseType)?.name) : null));
-    grid.appendChild(infoRow('Case manager', c.caseManager));
-    grid.appendChild(infoRow('Opened by', c.openedBy));
-    grid.appendChild(infoRow('Due date', dueDateOf(c)));
-    section.appendChild(grid);
+  // Compact view is now nothing at all: case number/client case number/
+  // name/due date/client were all already visible in the case header above
+  // (see caseHeaderLines(), whose 3rd line covers client -- the standalone
+  // "Client" row here was dropped as pure redundancy, at the user's
+  // request). Case manager isn't in the header but also isn't shown
+  // compact -- only via full edit. On-hold/research/high-priority no
+  // longer show as a separate checklist either -- they're folded into the
+  // status text itself now (see effectiveStatusText()). Full editing (all
+  // fields, all toggles) is still available via the header's edit icon --
+  // the compact view just has nothing left to summarize on its own.
+  if (!infoEditMode || !canEdit) return null;
 
-    const toggles = document.createElement('div');
-    toggles.className = 'case-toggles';
-    [['On hold', c.onHold], ['High priority', c.highPriority], ['Show research to client', c.showResearchToClient]].forEach(([label, val]) => {
-      const span = document.createElement('span');
-      span.className = 'checkbox-inline';
-      span.textContent = `${val ? '✓' : '—'} ${label}`;
-      toggles.appendChild(span);
-    });
-    section.appendChild(toggles);
-    return section;
-  }
+  const section = document.createElement('div');
+  section.className = 'case-section';
 
   // Full/editable view.
   const grid = document.createElement('div');
   grid.className = 'case-grid';
 
   const caseNumInput = document.createElement('input');
+  caseNumInput.className = 'mono';
   caseNumInput.value = c.caseNumber || '';
   const caseNumWarn = document.createElement('div'); caseNumWarn.className = 'warn-text hidden';
   function refreshCaseNumWarn() {
@@ -442,6 +590,7 @@ function buildInfoSection(c) {
   grid.appendChild(fieldRow('Case number', caseNumInput, caseNumWarn));
 
   const clientNumInput = document.createElement('input');
+  clientNumInput.className = 'mono';
   clientNumInput.value = c.clientCaseNumber || '';
   const clientNumWarn = document.createElement('div'); clientNumWarn.className = 'warn-text hidden';
   function refreshClientNumWarn() {
@@ -550,261 +699,554 @@ function textField(labelText, value, type, onSave) {
 }
 
 // ---------------------------------------------------------------------
-// Workflow section -- the case's own stage progress (new -> lab -> write
-// -> archive -> done), the write stage's nested writing workflow, the
-// archiving workflow's items, and case deletion (any stage, team-leader
-// judgment call -- see SPEC.md's "Case lifecycle").
+// Workflow section (0.5.0 rebuild) -- renders whatever the case's own
+// top-level Workflow actually contains, recursing into nested Actions,
+// down to whichever Task is being viewed. See workflow.js for the
+// underlying primitive and SPEC.md's "The Workflow / Action / Task
+// primitive" for the design this replaces the old fixed New/Lab/Write/
+// Archive/Done + writing/archiving-workflow machinery with entirely.
 // ---------------------------------------------------------------------
-function isActionComplete(a) {
-  return a.status === true && (a.type !== 'verified' || !!a.verifiedBy);
+function readonlyNote(text) {
+  const p = document.createElement('p'); p.className = 'muted';
+  p.textContent = text;
+  return p;
 }
 
-async function maybeAutoAdvanceToWrite(caseId, samples) {
-  if (samples.length === 0) return;
-  for (const s of samples) {
-    if (s.actions.length === 0) return;
-    for (const a of s.actions) {
-      if (!isActionComplete(a)) return;
-    }
-  }
-  await updateDoc(doc(db, 'cases', caseId), { stage: 'write', writingStage: 'draft' });
+// Long-press (phone) / right-click (desktop) -- same gesture and timing
+// already used for the header logo's jump-to-test/root gesture in
+// auth-ui.js, reused here for the stage-circle force-jump.
+function attachLongPress(el, callback) {
+  el.addEventListener('contextmenu', (e) => { e.preventDefault(); callback(); });
+  let timer = null;
+  el.addEventListener('touchstart', () => { timer = setTimeout(callback, 600); });
+  ['touchend', 'touchmove', 'touchcancel'].forEach((evt) => el.addEventListener(evt, () => clearTimeout(timer)));
 }
 
-async function maybeAutoAdvanceToDone(caseId, c) {
-  const items = c.archivingWorkflow || [];
-  if (items.length === 0) return;
-  if (items.every((it) => it.status === 'done')) {
-    await updateDoc(doc(db, 'cases', caseId), { stage: 'done' });
-  }
-}
-
-// See canUpdateCase's note above -- adding a sample/action, or reopening
-// a completed one, pulls a case back from `write` to `lab` if it had
-// already auto-advanced there (SPEC.md's reversibility rule). Only fires
-// for whoever's allowed to write to the case doc; otherwise it's caught
-// up next time an authorized user opens the case (same pattern as the
-// forward auto-advances above).
-async function reopenToLabIfNeeded(caseId) {
-  const snap = await getDoc(doc(db, 'cases', caseId));
-  if (!snap.exists()) return;
-  const c = snap.data();
-  if (c.stage === 'write' && canUpdateCase({ id: caseId, ...c })) {
-    await updateDoc(doc(db, 'cases', caseId), { stage: 'lab', writingStage: null });
-  }
+// Long-press a stage circle -> confirm popover -> forces workflowLike's own
+// currentIndex to `idx` regardless of whether the automatic advancement
+// condition is actually met (SPEC.md's "Manual override"). A plain tap
+// only ever *previews* (see buildWorkflowLevel). Passes `ancestorPath` as
+// recomputeAdvancement's exemptPath so this exact level's forced value
+// isn't immediately overwritten by the same save -- it holds until the
+// next unrelated save re-derives it normally (see workflow.js's own
+// comment on this trade-off).
+function attachForceJump(btn, anchorEl, c, ancestorPath, idx, targetLabel) {
+  attachLongPress(btn, () => {
+    if (anchorEl.querySelector('.confirm-row')) return;
+    const confirmRow = document.createElement('div');
+    confirmRow.className = 'confirm-row';
+    confirmRow.style.cssText = 'position:absolute; left:0; top:66px; background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:10px; width:230px; z-index:5;';
+    const msg = document.createElement('p'); msg.className = 'error'; msg.style.margin = '0 0 8px';
+    msg.textContent = `Jump to "${targetLabel}" now, skipping the normal order?`;
+    const confirmBtn = document.createElement('button');
+    confirmBtn.type = 'button'; confirmBtn.className = 'btn btn-small btn-primary'; confirmBtn.textContent = 'Jump';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button'; cancelBtn.className = 'btn btn-small'; cancelBtn.textContent = 'Cancel'; cancelBtn.style.marginLeft = '8px';
+    cancelBtn.addEventListener('click', () => confirmRow.remove());
+    confirmBtn.addEventListener('click', async () => {
+      confirmBtn.disabled = true;
+      const updated = updateAtPath(c.workflow, ancestorPath, (level) => ({ ...level, currentIndex: idx }));
+      recomputeAdvancement(updated, ancestorPath);
+      await updateDoc(doc(db, 'cases', c.id), { workflow: updated });
+      viewedPath = [...ancestorPath, idx];
+      await renderCaseDetail(c.id);
+    });
+    confirmRow.append(msg, confirmBtn, cancelBtn);
+    anchorEl.appendChild(confirmRow);
+  });
 }
 
 function buildWorkflowSection(c, samples) {
   const section = document.createElement('div');
   section.className = 'case-section';
   const h3 = document.createElement('h3');
-  h3.textContent = `Workflow — ${stageLabel(c.stage)}`;
+  h3.textContent = 'Workflow';
   section.appendChild(h3);
 
+  // Edit mode: lets whoever can edit the case's own info fields
+  // (team_leader or this case's caseManager -- same gate as editInfoBtn,
+  // a notch above "any case staff can mark an action done") restructure
+  // the case's own Workflow in place -- add/remove items at any level,
+  // insert from the catalog -- instead of it being frozen at whatever the
+  // case type's template had at creation. Same toggle-icon pattern as
+  // editInfoBtn.
   const editAllowed = canUpdateCase(c);
-
-  if (c.stage === 'new') {
-    if (samples.length === 0) {
-      const note = document.createElement('p'); note.className = 'muted';
-      note.textContent = 'Add at least one sample before starting lab.';
-      section.appendChild(note);
-    }
-    // Exits `new` via an explicit team-leader confirmation only -- not
-    // gated on field-completeness (SPEC.md's "Case lifecycle").
-    if (myProfile.role === 'team_leader') {
-      const btn = document.createElement('button');
-      btn.className = 'btn btn-primary'; btn.textContent = 'Start lab';
-      btn.disabled = samples.length === 0;
-      btn.addEventListener('click', async () => {
-        await updateDoc(doc(db, 'cases', c.id), { stage: 'lab' });
-        await renderCaseDetail(c.id);
-      });
-      section.appendChild(btn);
-    }
-  } else if (c.stage === 'lab') {
-    const totalActions = samples.reduce((sum, s) => sum + s.actions.length, 0);
-    const doneActions = samples.reduce((sum, s) => sum + s.actions.filter(isActionComplete).length, 0);
-    const completeSamples = samples.filter((s) => s.actions.length > 0 && s.actions.every(isActionComplete)).length;
-    const p = document.createElement('p'); p.className = 'muted';
-    p.textContent = `${completeSamples}/${samples.length} samples complete (${doneActions}/${totalActions} actions done). Moves to Write automatically once every sample's actions are done (verified-type actions need sign-off too).`;
-    section.appendChild(p);
-  } else if (c.stage === 'write') {
-    section.appendChild(buildWritingWorkflow(c, editAllowed));
-  } else if (c.stage === 'archive') {
-    section.appendChild(buildArchivingWorkflow(c, editAllowed));
-  } else if (c.stage === 'done') {
-    const p = document.createElement('p'); p.className = 'muted'; p.textContent = 'This case is done.';
-    section.appendChild(p);
+  if (editAllowed) {
+    const editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.className = 'icon-btn icon-btn-small icon-btn-accent' + (workflowEditMode ? ' active' : '');
+    editBtn.style.marginLeft = '10px';
+    editBtn.title = workflowEditMode ? 'Done editing' : 'Edit workflow';
+    editBtn.setAttribute('aria-label', editBtn.title);
+    editBtn.innerHTML = EDIT_ICON_SVG;
+    editBtn.addEventListener('click', () => {
+      workflowEditMode = !workflowEditMode;
+      renderCaseDetail(c.id);
+    });
+    h3.appendChild(editBtn);
   }
 
-  // Deletion: any case, any stage, team-leader judgment call (0.4.1 --
-  // no longer tied to reaching `done`; setup/firestore.rules already
-  // enforces team_leader-only, unchanged from Iteration 4).
-  if (myProfile.role === 'team_leader') {
-    section.appendChild(buildDeleteCaseControl(c));
+  if (!c.workflow.items || c.workflow.items.length === 0) {
+    section.appendChild(buildEmptyWorkflowLevel(c, c.workflow, [], 'No workflow defined for this case type yet.'));
+    return section;
   }
 
+  if (!viewedPath) viewedPath = currentPathOf(c.workflow);
+  section.appendChild(buildWorkflowLevel(c, c.workflow, [], samples, true));
   return section;
 }
 
-// Provisional simplification per SPEC.md, flagged there as not fully
-// confirmed: "back" from either review is a plain two-step loop (revise,
-// then re-review), no hard cap, and org-manager-review's back is assumed
-// to land on secondDraft (same as leaderReview's back), matching "same as
-// leader review's back" in SPEC.md.
-function buildWritingWorkflow(c, editAllowed) {
+// An items[]-bearing level with nothing in it yet -- either a genuinely
+// empty top-level Workflow (case type had no template) or a container
+// Action with no children yet. No circles to show (buildWorkflowLevel
+// assumes at least one item), so this is its own small branch: an
+// add-controls panel in edit mode, a plain note otherwise.
+function buildEmptyWorkflowLevel(c, workflowLike, ancestorPath, emptyLabel) {
   const wrap = document.createElement('div');
-  const p = document.createElement('p'); p.className = 'muted';
-  p.textContent = `Writing stage: ${WRITING_LABELS[c.writingStage] || c.writingStage}`;
-  wrap.appendChild(p);
-
-  if (!editAllowed) return wrap;
-
-  async function setWritingStage(stage) {
-    await updateDoc(doc(db, 'cases', c.id), { writingStage: stage });
-    await renderCaseDetail(c.id);
-  }
-  async function publish() {
-    await updateDoc(doc(db, 'cases', c.id), { writingStage: 'published', stage: 'archive' });
-    await renderCaseDetail(c.id);
-  }
-
-  const btnRow = document.createElement('div');
-  btnRow.style.display = 'flex'; btnRow.style.gap = '8px'; btnRow.style.flexWrap = 'wrap';
-
-  if (c.writingStage === 'draft') {
-    const btn = document.createElement('button'); btn.className = 'btn btn-primary'; btn.textContent = 'Send to leader review';
-    btn.addEventListener('click', () => setWritingStage('leaderReview'));
-    btnRow.appendChild(btn);
-  } else if (c.writingStage === 'leaderReview') {
-    const back = document.createElement('button'); back.className = 'btn'; back.textContent = 'Back to draft (revise)';
-    back.addEventListener('click', () => setWritingStage('draft'));
-    const advance = document.createElement('button'); advance.className = 'btn btn-primary'; advance.textContent = 'Advance to second draft';
-    advance.addEventListener('click', () => setWritingStage('secondDraft'));
-    btnRow.append(back, advance);
-  } else if (c.writingStage === 'secondDraft') {
-    const btn = document.createElement('button'); btn.className = 'btn btn-primary'; btn.textContent = 'Send to org manager review';
-    btn.addEventListener('click', () => setWritingStage('orgManagerReview'));
-    btnRow.appendChild(btn);
-  } else if (c.writingStage === 'orgManagerReview') {
-    const back = document.createElement('button'); back.className = 'btn'; back.textContent = 'Back to second draft (revise)';
-    back.addEventListener('click', () => setWritingStage('secondDraft'));
-    const pub = document.createElement('button'); pub.className = 'btn btn-primary'; pub.textContent = 'Publish';
-    pub.addEventListener('click', publish);
-    btnRow.append(back, pub);
-  }
-  wrap.appendChild(btnRow);
-  return wrap;
-}
-
-function buildArchivingWorkflow(c, editAllowed) {
-  const wrap = document.createElement('div');
-  const items = c.archivingWorkflow || [];
-  items
-    .map((item, idx) => ({ item, idx }))
-    .sort((a, b) => a.item.order - b.item.order)
-    .forEach(({ item, idx }) => wrap.appendChild(buildArchivingItemRow(c, item, idx, editAllowed)));
-
-  if (editAllowed) {
-    const addForm = document.createElement('form');
-    addForm.className = 'add-row';
-    const nameInput = document.createElement('input'); nameInput.placeholder = 'New step name'; nameInput.required = true;
-    const orderInput = document.createElement('input'); orderInput.type = 'number'; orderInput.placeholder = 'Order'; orderInput.style.maxWidth = '80px';
-    const nameField = document.createElement('div'); nameField.className = 'field'; nameField.appendChild(nameInput);
-    const orderField = document.createElement('div'); orderField.className = 'field'; orderField.appendChild(orderInput);
-    const addBtn = document.createElement('button'); addBtn.type = 'submit'; addBtn.className = 'btn btn-small'; addBtn.textContent = 'Add step';
-    addForm.append(nameField, orderField, addBtn);
-    addForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const name = nameInput.value.trim();
-      if (!name) return;
-      const maxOrder = items.length ? Math.max(...items.map((i) => i.order)) : 0;
-      const order = orderInput.value ? parseInt(orderInput.value, 10) : maxOrder + 1;
-      const updated = [...items, { name, order, status: 'pending', executedBy: null, executedAt: null }];
-      await updateDoc(doc(db, 'cases', c.id), { archivingWorkflow: updated });
-      await renderCaseDetail(c.id);
-    });
-    wrap.appendChild(addForm);
+  if (workflowEditMode && canUpdateCase(c)) {
+    wrap.appendChild(buildWorkflowLevelEditControls(c, workflowLike, ancestorPath));
+  } else {
+    wrap.appendChild(readonlyNote(emptyLabel));
   }
   return wrap;
 }
 
-function buildArchivingItemRow(c, item, idx, editAllowed) {
-  const row = document.createElement('div');
-  row.className = 'action-row';
-  const label = document.createElement('span');
-  label.textContent = item.name + (item.status === 'done' ? ' — done' : '');
-  row.appendChild(label);
+// One items[]-bearing level (the case's own top-level Workflow, or any
+// nested container Action's own items) -- a circle strip (reusing the
+// same stage-flow visual device 0.4.1 built for the fixed 5-stage case,
+// now applied at every nesting depth) plus whichever child is being
+// viewed below it. `ancestorLive` threads down whether every ancestor
+// level was ALSO pointing at its own real current item -- a terminal
+// action's controls only go live when the *entire* path from the root
+// matches the workflow's real current path, otherwise it's a read-only
+// preview (0.4.1's read-only-elsewhere rule, generalized to arbitrary
+// depth).
+function buildWorkflowLevel(c, workflowLike, ancestorPath, samples, ancestorLive) {
+  const wrap = document.createElement('div');
+  wrap.className = 'workflow-level';
 
-  const controls = document.createElement('span');
-  if (editAllowed) {
-    const removeBtn = document.createElement('button');
-    removeBtn.type = 'button'; removeBtn.className = 'btn btn-small'; removeBtn.textContent = 'Remove';
-    removeBtn.addEventListener('click', async () => {
-      const updated = c.archivingWorkflow.filter((_, i) => i !== idx);
-      await updateDoc(doc(db, 'cases', c.id), { archivingWorkflow: updated });
-      await renderCaseDetail(c.id);
-    });
-    controls.appendChild(removeBtn);
+  const realCurrentIdx = Math.min(workflowLike.currentIndex || 0, workflowLike.items.length - 1);
+  const viewedIdx = viewedPath.length > ancestorPath.length ? viewedPath[ancestorPath.length] : realCurrentIdx;
 
-    if (item.status !== 'done') {
-      const execBtn = document.createElement('button');
-      execBtn.type = 'button'; execBtn.className = 'btn btn-small btn-primary'; execBtn.textContent = 'Mark done';
-      execBtn.style.marginLeft = '6px';
-      execBtn.addEventListener('click', async () => {
-        const updated = c.archivingWorkflow.map((it, i) => (i === idx ? { ...it, status: 'done', executedBy: myProfile.username, executedAt: new Date() } : it));
-        await updateDoc(doc(db, 'cases', c.id), { archivingWorkflow: updated });
-        await renderCaseDetail(c.id);
-      });
-      controls.appendChild(execBtn);
+  const flow = document.createElement('div'); flow.className = 'stage-flow';
+
+  // No "current" concept is surfaced in this circle strip at all (removed
+  // 2026-09-24 at the user's direct request) -- every node just shows its
+  // own actual completion state, independent of position. `currentIndex`
+  // still exists underneath (forward-only bookkeeping, see workflow.js)
+  // purely to pick a sensible default `viewedIdx` when nothing's been
+  // explicitly clicked into yet -- it's never highlighted, and unticking
+  // an action never moves it backward or visibly reverts anything here.
+  workflowLike.items.forEach((node, idx) => {
+    if (idx > 0) {
+      const line = document.createElement('div');
+      line.className = 'stage-flow-line';
+      if (isNodeDone(workflowLike.items[idx - 1])) line.classList.add('done');
+      flow.appendChild(line);
     }
+    const nodePath = [...ancestorPath, idx];
+    const btn = document.createElement('button');
+    btn.type = 'button'; btn.className = 'stage-flow-node';
+    if (idx === viewedIdx) btn.classList.add('viewed');
+
+    const nameEl = document.createElement('div');
+    nameEl.textContent = node.name;
+    btn.appendChild(nameEl);
+
+    // Every node -- terminal or container -- just shows its own
+    // completion percentage: solid fill once fully done, a proportional
+    // conic-gradient fill in between, plain/unfilled at 0%. Containers
+    // also get an "x/y" count of their done terminal descendants; a
+    // terminal is trivially 0% or 100%, so no fraction label needed there.
+    const [doneCount, totalCount] = doneFraction(node);
+    if (totalCount > 0 && doneCount === totalCount) btn.classList.add('done');
+    if (node.kind === 'container' && totalCount > 0) {
+      const progEl = document.createElement('div');
+      progEl.className = 'stage-flow-node-progress';
+      progEl.textContent = `${doneCount}/${totalCount}`;
+      btn.appendChild(progEl);
+    }
+    if (totalCount > 0 && doneCount > 0 && doneCount < totalCount) {
+      const pct = Math.round((doneCount / totalCount) * 100);
+      btn.style.background = `conic-gradient(var(--accent-dim) ${pct}%, var(--panel2) ${pct}% 100%)`;
+    }
+
+    btn.title = node.name;
+    btn.addEventListener('click', () => { viewedPath = nodePath; renderCaseDetail(c.id); });
+    attachForceJump(btn, flow, c, ancestorPath, idx, node.name);
+    flow.appendChild(btn);
+  });
+
+  wrap.appendChild(flow);
+
+  if (workflowEditMode && canUpdateCase(c)) {
+    wrap.appendChild(buildWorkflowLevelEditControls(c, workflowLike, ancestorPath));
   }
-  row.appendChild(controls);
+
+  const viewedNode = workflowLike.items[viewedIdx];
+  const isLiveHere = ancestorLive && viewedIdx === realCurrentIdx;
+
+  if (viewedNode.kind === 'container') {
+    if (!viewedNode.items || viewedNode.items.length === 0) {
+      wrap.appendChild(buildEmptyWorkflowLevel(c, viewedNode, [...ancestorPath, viewedIdx], `${viewedNode.name}: no steps yet.`));
+    } else {
+      wrap.appendChild(buildWorkflowLevel(c, viewedNode, [...ancestorPath, viewedIdx], samples, isLiveHere));
+    }
+  } else {
+    wrap.appendChild(buildTerminalActionPanel(c, viewedNode, [...ancestorPath, viewedIdx], samples, isLiveHere));
+  }
+
+  return wrap;
+}
+
+// The catalog definition (if any) that scopes what's insertable AT this
+// exact editing context -- null for the case's own top-level workflow
+// (= case-level, per SPEC's hierarchy-scoping), or the defId of whichever
+// container node ancestorPath points at otherwise. An ad hoc container
+// (never picked from the catalog) has no defId, so nothing in the catalog
+// can ever be placed inside it -- see catalog-ui.js's actionDefsForContext.
+function contextDefIdFor(c, ancestorPath) {
+  if (ancestorPath.length === 0) return null;
+  const node = nodeAtPath(c.workflow, ancestorPath);
+  return node ? (node.defId || null) : null;
+}
+
+// Structural editing for one items[]-bearing level of a LIVE case's own
+// Workflow -- add a blank action, insert a copy from the catalog
+// (context-filtered, same "+ From catalog" picker as the case-type
+// template editor, see catalog-ui.js), reorder (drag the handle, or the
+// ↑/↓ buttons)/rename/remove an existing item, or turn one into a
+// container so it can hold its own sub-actions (see the "+ Sub-action"
+// button below). Every change writes the whole `workflow` field back (via
+// saveWorkflowStructure) and re-renders, same read-modify-write pattern
+// used throughout this app.
+function buildWorkflowLevelEditControls(c, workflowLike, ancestorPath) {
+  const wrap = document.createElement('div');
+  wrap.className = 'workflow-editor-level';
+
+  workflowLike.items.forEach((node, idx) => {
+    const row = document.createElement('div'); row.className = 'workflow-node-editor';
+    const header = document.createElement('div');
+    header.style.cssText = 'display:flex; gap:6px; align-items:center; position:relative; flex-wrap:wrap;';
+
+    // Native HTML5 drag-and-drop, triggered only from this small handle
+    // (not the whole row) so dragging doesn't fight with selecting/
+    // editing text in the name input right next to it.
+    const dragHandle = document.createElement('span');
+    dragHandle.className = 'drag-handle'; dragHandle.title = 'Drag to reorder'; dragHandle.textContent = '⠿';
+    dragHandle.setAttribute('draggable', 'true');
+    row.addEventListener('dragstart', (e) => {
+      e.dataTransfer.setData('text/plain', String(idx));
+      e.dataTransfer.effectAllowed = 'move';
+      row.classList.add('dragging');
+    });
+    row.addEventListener('dragend', () => row.classList.remove('dragging'));
+    row.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; row.classList.add('drag-over'); });
+    row.addEventListener('dragleave', () => row.classList.remove('drag-over'));
+    row.addEventListener('drop', (e) => {
+      e.preventDefault();
+      row.classList.remove('drag-over');
+      const fromIdx = parseInt(e.dataTransfer.getData('text/plain'), 10);
+      if (Number.isNaN(fromIdx) || fromIdx === idx) return;
+      saveWorkflowStructure(c, ancestorPath, (level) => moveItem(level, fromIdx, idx));
+    });
+
+    const upBtn = document.createElement('button');
+    upBtn.type = 'button'; upBtn.className = 'btn btn-small'; upBtn.textContent = '↑'; upBtn.title = 'Move up';
+    upBtn.disabled = idx === 0;
+    upBtn.addEventListener('click', () => saveWorkflowStructure(c, ancestorPath, (level) => moveItem(level, idx, idx - 1)));
+
+    const downBtn = document.createElement('button');
+    downBtn.type = 'button'; downBtn.className = 'btn btn-small'; downBtn.textContent = '↓'; downBtn.title = 'Move down';
+    downBtn.disabled = idx === workflowLike.items.length - 1;
+    downBtn.addEventListener('click', () => saveWorkflowStructure(c, ancestorPath, (level) => moveItem(level, idx, idx + 1)));
+
+    const nameInput = document.createElement('input');
+    nameInput.value = node.name; nameInput.style.flex = '1'; nameInput.style.minWidth = '100px';
+    nameInput.addEventListener('change', () => saveWorkflowStructure(c, ancestorPath, (level) => ({
+      ...level,
+      items: level.items.map((n, i) => (i === idx ? { ...n, name: nameInput.value.trim() || n.name } : n))
+    })));
+
+    // Turns this action into a container (if it isn't one already) and
+    // navigates into it, ready to add whatever goes inside -- e.g. adding
+    // "Draft" under "Writing". Promoting a terminal action this way drops
+    // its own done flag/parameters/assignments (a container's "content"
+    // is its nested workflow, not data entry of its own), same
+    // terminal-only default used elsewhere.
+    const subActionBtn = document.createElement('button');
+    subActionBtn.type = 'button'; subActionBtn.className = 'btn btn-small'; subActionBtn.textContent = '+ Sub-action';
+    subActionBtn.addEventListener('click', async () => {
+      const nodePath = [...ancestorPath, idx];
+      if (node.kind !== 'container') {
+        await saveWorkflowStructure(c, ancestorPath, (level) => ({
+          ...level,
+          items: level.items.map((n, i) => (i === idx ? { kind: 'container', id: n.id, defId: n.defId, name: n.name, items: [], currentIndex: 0 } : n))
+        }));
+      }
+      viewedPath = nodePath;
+      await renderCaseDetail(c.id);
+    });
+
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button'; removeBtn.className = 'icon-btn icon-btn-small icon-btn-danger';
+    removeBtn.title = 'Remove'; removeBtn.setAttribute('aria-label', 'Remove');
+    removeBtn.innerHTML = TRASH_ICON_SVG;
+    removeBtn.addEventListener('click', () => {
+      if (header.querySelector('.confirm-row')) return;
+      const confirmRow = document.createElement('div');
+      confirmRow.className = 'confirm-row';
+      confirmRow.style.cssText = 'position:absolute; right:0; top:34px; background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:10px; width:230px; z-index:5;';
+      const msg = document.createElement('p'); msg.className = 'error'; msg.style.margin = '0 0 8px';
+      msg.textContent = node.kind === 'container'
+        ? `Remove "${node.name}" and everything nested under it?`
+        : `Remove "${node.name}"? Any recorded value on it is lost.`;
+      const confirmBtn = document.createElement('button');
+      confirmBtn.type = 'button'; confirmBtn.className = 'btn btn-small btn-primary'; confirmBtn.textContent = 'Confirm';
+      const cancelBtn = document.createElement('button');
+      cancelBtn.type = 'button'; cancelBtn.className = 'btn btn-small'; cancelBtn.textContent = 'Cancel'; cancelBtn.style.marginLeft = '8px';
+      cancelBtn.addEventListener('click', () => confirmRow.remove());
+      confirmBtn.addEventListener('click', () => saveWorkflowStructure(c, ancestorPath, (level) => ({
+        ...level, items: level.items.filter((_, i) => i !== idx)
+      })));
+      confirmRow.append(msg, confirmBtn, cancelBtn);
+      header.appendChild(confirmRow);
+    });
+
+    header.append(dragHandle, upBtn, downBtn, nameInput, subActionBtn, removeBtn);
+    row.appendChild(header);
+    wrap.appendChild(row);
+  });
+
+  const addRow = document.createElement('div');
+  addRow.style.cssText = 'display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;';
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button'; addBtn.className = 'btn btn-small'; addBtn.textContent = '+ Action';
+  addBtn.addEventListener('click', () => saveWorkflowStructure(c, ancestorPath, (level) => ({
+    ...level, items: [...level.items, newTerminalNode('New action')]
+  })));
+  addRow.append(addBtn);
+  wrap.appendChild(addRow);
+  wrap.appendChild(buildCatalogPickerForCase(c, ancestorPath));
+
+  return wrap;
+}
+
+function buildCatalogPickerForCase(c, ancestorPath) {
+  const contextDefId = contextDefIdFor(c, ancestorPath);
+  const defs = actionDefsForContext(contextDefId);
+  const row = document.createElement('div'); row.className = 'catalog-picker-row';
+  if (defs.length === 0) {
+    row.appendChild(Object.assign(document.createElement('span'), { className: 'muted', textContent: 'No catalog actions defined at this level yet.' }));
+    return row;
+  }
+  const select = document.createElement('select');
+  const blankOpt = document.createElement('option'); blankOpt.value = ''; blankOpt.textContent = '(pick from catalog)';
+  select.appendChild(blankOpt);
+  defs.forEach((a) => {
+    const opt = document.createElement('option');
+    opt.value = a.id; opt.textContent = actionDefPath(a.id);
+    select.appendChild(opt);
+  });
+
+  const insertBtn = document.createElement('button');
+  insertBtn.type = 'button'; insertBtn.className = 'btn btn-small'; insertBtn.textContent = '+ From catalog';
+  insertBtn.addEventListener('click', () => {
+    if (!select.value) return;
+    const node = nodeFromActionDef(select.value);
+    if (node) saveWorkflowStructure(c, ancestorPath, (level) => ({ ...level, items: [...level.items, node] }));
+  });
+
+  row.append(select, insertBtn);
   return row;
 }
 
-function buildDeleteCaseControl(c) {
-  const wrap = document.createElement('div');
-  wrap.style.marginTop = '20px';
-  const btn = document.createElement('button');
-  btn.className = 'btn'; btn.textContent = 'Delete case';
-  wrap.appendChild(btn);
+async function saveWorkflowStructure(c, path, mutator) {
+  const updated = updateAtPath(c.workflow, path, mutator);
+  // A structural edit (item added/removed) can leave a level's
+  // currentIndex out of bounds or newly satisfy the advance condition --
+  // recomputeAdvancement re-clamps and re-cascades from scratch.
+  recomputeAdvancement(updated);
+  await updateDoc(doc(db, 'cases', c.id), { workflow: updated });
+  await renderCaseDetail(c.id);
+}
 
-  btn.addEventListener('click', () => {
-    if (wrap.querySelector('.confirm-row')) return;
-    const confirmRow = document.createElement('div');
-    confirmRow.className = 'confirm-row';
-    confirmRow.style.marginTop = '10px';
-    const msg = document.createElement('p'); msg.className = 'error';
-    msg.textContent = 'This permanently deletes the case and everything in it. This cannot be undone.';
-    const confirmBtn = document.createElement('button');
-    confirmBtn.className = 'btn btn-small btn-primary'; confirmBtn.textContent = 'Confirm delete';
-    const cancelBtn = document.createElement('button');
-    cancelBtn.className = 'btn btn-small'; cancelBtn.textContent = 'Cancel'; cancelBtn.style.marginLeft = '8px';
-    cancelBtn.addEventListener('click', () => confirmRow.remove());
-    confirmBtn.addEventListener('click', async () => {
-      confirmBtn.disabled = true;
-      await deleteCaseCascade(c.id);
-      caseDetailScreen.classList.add('hidden');
-      casesScreen.classList.remove('hidden');
-      loadCaseList();
+async function saveActionField(c, path, patch) {
+  const updated = updateAtPath(c.workflow, path, (node) => ({ ...node, ...patch }));
+  recomputeAdvancement(updated);
+  await updateDoc(doc(db, 'cases', c.id), { workflow: updated });
+  await renderCaseDetail(c.id);
+}
+
+function optionLabel(options, sampleId, zone) {
+  const opt = options.find((o) => o.sampleId === sampleId && o.zone === zone);
+  return opt ? opt.label : sampleId + (zone ? ` (${zone})` : '');
+}
+
+// One input per parameter -- a 'list' parameter is a <select> of its
+// admin-defined options, a 'value' parameter is free text.
+function buildParameterInput(param, value, onChange) {
+  let input;
+  if (param.mode === 'list') {
+    input = document.createElement('select');
+    const blank = document.createElement('option'); blank.value = ''; blank.textContent = '(choose)';
+    input.appendChild(blank);
+    (param.options || []).forEach((optVal) => {
+      const opt = document.createElement('option'); opt.value = optVal; opt.textContent = optVal;
+      if (optVal === value) opt.selected = true;
+      input.appendChild(opt);
     });
-    confirmRow.append(msg, confirmBtn, cancelBtn);
-    wrap.appendChild(confirmRow);
+  } else {
+    input = document.createElement('input'); input.className = 'mono'; input.value = value || '';
+  }
+  input.addEventListener('change', () => onChange(input.value));
+  return input;
+}
+
+// Per-parameter values for every zone/sample currently assigned to a
+// parametrized action -- a "set for all" bulk row, then one row per
+// assignment to override an individual one (SPEC.md's "apply to all, then
+// override individually").
+function buildParameterValuesEditor(c, action, path, options) {
+  const wrap = document.createElement('div'); wrap.className = 'task-execute-form';
+
+  const bulkRow = document.createElement('div'); bulkRow.className = 'value-row'; bulkRow.style.flexWrap = 'wrap';
+  const bulkLabel = document.createElement('span'); bulkLabel.className = 'muted'; bulkLabel.textContent = 'Set for all: ';
+  bulkRow.appendChild(bulkLabel);
+  const bulkInputs = {};
+  action.parameters.forEach((p) => {
+    const field = document.createElement('div'); field.className = 'field';
+    field.style.cssText = 'display:inline-block; min-width:140px; margin-right:8px;';
+    const fLabel = document.createElement('label'); fLabel.textContent = p.name;
+    const input = buildParameterInput(p, '', () => {});
+    bulkInputs[p.id] = input;
+    field.append(fLabel, input);
+    bulkRow.appendChild(field);
+  });
+  const applyBtn = document.createElement('button');
+  applyBtn.type = 'button'; applyBtn.className = 'btn btn-small'; applyBtn.textContent = 'Apply to all';
+  applyBtn.addEventListener('click', () => {
+    const nextAssigned = action.assignedTo.map((a) => ({
+      ...a,
+      values: action.parameters.map((p) => ({ parameterId: p.id, value: bulkInputs[p.id].value }))
+    }));
+    saveActionField(c, path, { assignedTo: nextAssigned });
+  });
+  bulkRow.appendChild(applyBtn);
+  wrap.appendChild(bulkRow);
+
+  action.assignedTo.forEach((a, aIdx) => {
+    const row = document.createElement('div'); row.className = 'action-row';
+    const label = document.createElement('span'); label.textContent = optionLabel(options, a.sampleId, a.zone);
+    row.appendChild(label);
+    const fieldsWrap = document.createElement('span'); fieldsWrap.style.cssText = 'display:flex; gap:8px; flex-wrap:wrap;';
+    action.parameters.forEach((p) => {
+      const existing = (a.values || []).find((v) => v.parameterId === p.id);
+      const input = buildParameterInput(p, existing ? existing.value : '', (val) => {
+        const nextAssigned = action.assignedTo.map((entry, i) => {
+          if (i !== aIdx) return entry;
+          const hasSlot = (entry.values || []).some((v) => v.parameterId === p.id);
+          const values = hasSlot
+            ? entry.values.map((v) => (v.parameterId === p.id ? { ...v, value: val } : v))
+            : [...(entry.values || []), { parameterId: p.id, value: val }];
+          return { ...entry, values };
+        });
+        saveActionField(c, path, { assignedTo: nextAssigned });
+      });
+      fieldsWrap.appendChild(input);
+    });
+    row.appendChild(fieldsWrap);
+    wrap.appendChild(row);
   });
 
   return wrap;
 }
 
-// Firestore doesn't cascade-delete subcollections -- every sample,
-// action, and note doc has to be deleted individually before the case
-// doc itself.
+// Live tagging of which sample(s)/zone(s) a terminal action applies to --
+// a list, set at execution time, not something a sample owns (SPEC.md's
+// "Item / Sample / Zone"). Plain toggle chips rather than a
+// <select multiple> for friendlier touch targets. Toggling a chip adds/
+// removes an assignedTo entry (with a blank value per parameter, ready to
+// fill in via buildParameterValuesEditor below).
+function buildAssignmentEditor(c, action, path, samples) {
+  const wrap = document.createElement('div'); wrap.className = 'task-assignment';
+  const label = document.createElement('label'); label.textContent = 'Samples / zones';
+  wrap.appendChild(label);
+
+  const options = [];
+  samples.forEach((s) => {
+    const base = s.item ? `${s.item} - ${s.name}` : s.name;
+    options.push({ sampleId: s.id, zone: null, label: base });
+    (s.zones || []).forEach((z) => options.push({ sampleId: s.id, zone: z, label: `${base} (${z})` }));
+  });
+  if (options.length === 0) {
+    wrap.appendChild(readonlyNote('No samples yet.'));
+    return wrap;
+  }
+
+  const chipsWrap = document.createElement('div');
+  chipsWrap.style.cssText = 'display:flex; flex-wrap:wrap; gap:6px;';
+  options.forEach((opt) => {
+    const isAssigned = (action.assignedTo || []).some((a) => a.sampleId === opt.sampleId && a.zone === opt.zone);
+    const chip = document.createElement('button');
+    chip.type = 'button'; chip.className = 'btn btn-small' + (isAssigned ? ' active' : '');
+    chip.textContent = opt.label;
+    chip.addEventListener('click', () => {
+      const current = action.assignedTo || [];
+      const exists = current.some((a) => a.sampleId === opt.sampleId && a.zone === opt.zone);
+      const next = exists
+        ? current.filter((a) => !(a.sampleId === opt.sampleId && a.zone === opt.zone))
+        : [...current, { sampleId: opt.sampleId, zone: opt.zone, values: (action.parameters || []).map((p) => ({ parameterId: p.id, value: '' })) }];
+      saveActionField(c, path, { assignedTo: next });
+    });
+    chipsWrap.appendChild(chip);
+  });
+  wrap.appendChild(chipsWrap);
+
+  if ((action.parameters || []).length > 0 && (action.assignedTo || []).length > 0) {
+    wrap.appendChild(buildParameterValuesEditor(c, action, path, options));
+  }
+
+  return wrap;
+}
+
+function buildTerminalActionPanel(c, action, path, samples, isLive) {
+  const wrap = document.createElement('div'); wrap.className = 'task-panel';
+  const title = document.createElement('h4'); title.textContent = action.name;
+  wrap.appendChild(title);
+
+  // Terminal action: marked done when needed, that's the entire record --
+  // no executor, no timestamp, no verification (SPEC.md's deliberately
+  // thinner audit trail than 0.5.0's Task). "Mark done" stays interactive
+  // regardless of isLive -- at the user's direct request, so an
+  // already-passed action can still be unticked without needing to
+  // force-jump back to it first. Ticking/unticking only changes this
+  // action's own displayed completion state (see buildWorkflowLevel) --
+  // it never moves "current" or visibly reverts anything else in the UI
+  // (workflow.js's recomputeAdvancement is forward-only bookkeeping, not
+  // surfaced here at all). The rest of the panel (zone/sample assignment,
+  // parameter values) stays read-only-elsewhere, per the existing rule.
+  const doneLabel = document.createElement('label'); doneLabel.className = 'checkbox-inline';
+  const doneInput = document.createElement('input'); doneInput.type = 'checkbox'; doneInput.checked = !!action.isDone;
+  doneInput.addEventListener('change', () => saveActionField(c, path, { isDone: doneInput.checked }));
+  doneLabel.append(doneInput, ' Mark done');
+  wrap.appendChild(doneLabel);
+
+  if (!isLive) return wrap;
+
+  wrap.appendChild(buildAssignmentEditor(c, action, path, samples));
+
+  return wrap;
+}
+
+// Firestore doesn't cascade-delete subcollections -- every sample and note
+// doc has to be deleted individually before the case doc itself. 0.5.0:
+// samples no longer have their own actions subcollection (see workflow.js)
+// -- the case's own `workflow` field goes away automatically with the case
+// doc, nothing extra to clean up there.
 async function deleteCaseCascade(caseId) {
   const samplesSnap = await getDocs(collection(db, 'cases', caseId, 'samples'));
   for (const sDoc of samplesSnap.docs) {
-    const actionsSnap = await getDocs(collection(db, 'cases', caseId, 'samples', sDoc.id, 'actions'));
-    for (const aDoc of actionsSnap.docs) {
-      await deleteDoc(doc(db, 'cases', caseId, 'samples', sDoc.id, 'actions', aDoc.id));
-    }
     await deleteDoc(doc(db, 'cases', caseId, 'samples', sDoc.id));
   }
   const notesSnap = await getDocs(collection(db, 'cases', caseId, 'notes'));
@@ -815,19 +1257,51 @@ async function deleteCaseCascade(caseId) {
 }
 
 // ---------------------------------------------------------------------
-// Samples + their actions. `item` (renamed from `groupName`, 0.4.1) is
-// the optional label above a sample; `sample` is the only mandatory unit.
-// Each sample has a compact (default) and full (expanded) view.
+// Samples. `item` (renamed from `groupName`, 0.4.1) is the optional label
+// above a sample; `sample` is the only mandatory unit. Each sample has a
+// compact (default) and full (expanded) view. 0.5.0: samples are pure
+// item/zone/name structure with no actions of their own -- see workflow.js
+// and SPEC.md's "Item / Sample / Zone".
 // ---------------------------------------------------------------------
-function defaultSampleActions(template) {
-  return (template && template.length ? template : []).map((t) => ({
-    name: t.name, zone: null, type: t.type || 'simple', notes: '',
-    environment: [], calibration: [], measurements: [],
-    status: false, executedBy: null, executionTimestamp: null,
-    verifiedBy: null, verificationTimestamp: null, verifiedMeasurements: []
-  }));
+
+// Repeatable named-row editor -- one text input per row, used for the
+// batch-add view's sample-name/zone lists and for editing an existing
+// sample's zones in place (buildSampleStructureCard's edit mode). Reuses
+// .value-row's flex/wrap styling (built for the action value editors)
+// since a single-input row fits that layout fine too. `initialValues`
+// pre-populates rows (e.g. a sample's existing zones) without stealing
+// focus the way a freshly-added row does.
+function buildNameListEditor(addButtonLabel, placeholder, initialValues = []) {
+  const wrap = document.createElement('div');
+  const rows = document.createElement('div');
+  wrap.appendChild(rows);
+  function addRow(value, focusNewRow) {
+    const row = document.createElement('div'); row.className = 'value-row';
+    const input = document.createElement('input'); input.placeholder = placeholder;
+    if (value) input.value = value;
+    const rm = document.createElement('button'); rm.type = 'button'; rm.className = 'btn btn-small'; rm.textContent = '✕';
+    rm.addEventListener('click', () => row.remove());
+    row.append(input, rm);
+    rows.appendChild(row);
+    if (focusNewRow) input.focus();
+  }
+  initialValues.forEach((v) => addRow(v, false));
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button'; addBtn.className = 'btn btn-small'; addBtn.textContent = addButtonLabel;
+  addBtn.addEventListener('click', () => addRow(null, true));
+  wrap.appendChild(addBtn);
+  wrap.getValues = () => Array.from(rows.querySelectorAll('input')).map((i) => i.value.trim()).filter(Boolean);
+  return wrap;
 }
 
+// Batch add view (0.4.1 redesign, at the user's request): a toggled panel
+// instead of an always-open inline form. Set an item name and optionally
+// list out specific sample names -- if none are listed, the item itself is
+// treated as a single sample. Zones are entered via repeatable named rows
+// instead of a comma-separated string. No "number of copies" field
+// (dropped at the user's request, 2026-09-22) -- making several similar
+// samples is now done by duplicating an existing one instead (see
+// buildSampleStructureCard's duplicate icon).
 function buildSamplesSection(c, samples) {
   const section = document.createElement('div');
   section.className = 'case-section';
@@ -835,44 +1309,108 @@ function buildSamplesSection(c, samples) {
   h3.textContent = 'Samples';
   section.appendChild(h3);
 
-  const form = document.createElement('form');
-  form.className = 'add-row';
-  const itemInput = document.createElement('input'); itemInput.placeholder = 'Item (optional)';
-  const nameInput = document.createElement('input'); nameInput.placeholder = 'Sample name'; nameInput.required = true;
-  const zonesInput = document.createElement('input'); zonesInput.placeholder = 'Zones, comma-separated (optional)';
-  [itemInput, nameInput, zonesInput].forEach((el) => {
-    const f = document.createElement('div'); f.className = 'field'; f.appendChild(el); form.appendChild(f);
-  });
-  const addBtn = document.createElement('button');
-  addBtn.type = 'submit'; addBtn.className = 'btn btn-primary'; addBtn.textContent = 'Add sample';
-  form.appendChild(addBtn);
-  section.appendChild(form);
-  const err = document.createElement('div'); err.className = 'error'; section.appendChild(err);
+  const addToggleBtn = document.createElement('button');
+  addToggleBtn.type = 'button';
+  addToggleBtn.className = 'btn btn-primary btn-small';
+  addToggleBtn.textContent = '+ Add';
+  section.appendChild(addToggleBtn);
 
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
+  const addView = document.createElement('div');
+  addView.className = 'add-samples-view hidden';
+
+  const topRow = document.createElement('div'); topRow.className = 'add-row';
+  const itemField = document.createElement('div'); itemField.className = 'field';
+  const itemLabel = document.createElement('label'); itemLabel.textContent = 'Item name';
+  const itemInput = document.createElement('input');
+  itemField.append(itemLabel, itemInput);
+  topRow.append(itemField);
+  addView.appendChild(topRow);
+
+  const samplesLabel = document.createElement('label');
+  samplesLabel.textContent = 'Samples (optional -- leave empty to treat the whole item as one sample)';
+  addView.appendChild(samplesLabel);
+  const sampleListEditor = buildNameListEditor('+ Add sample', 'Sample name');
+  addView.appendChild(sampleListEditor);
+
+  const zonesLabel = document.createElement('label');
+  zonesLabel.textContent = 'Zones (optional)';
+  addView.appendChild(zonesLabel);
+  const zoneListEditor = buildNameListEditor('+ Set zone', 'Zone name');
+  addView.appendChild(zoneListEditor);
+
+  const createBtn = document.createElement('button');
+  createBtn.type = 'button'; createBtn.className = 'btn btn-primary'; createBtn.textContent = 'Create';
+  createBtn.style.marginTop = '10px';
+  addView.appendChild(createBtn);
+  const err = document.createElement('div'); err.className = 'error'; addView.appendChild(err);
+
+  section.appendChild(addView);
+
+  addToggleBtn.addEventListener('click', () => {
+    const willShow = addView.classList.contains('hidden');
+    addView.classList.toggle('hidden');
+    addToggleBtn.textContent = willShow ? '✕ Cancel' : '+ Add';
+    addToggleBtn.classList.toggle('active', willShow);
+  });
+
+  createBtn.addEventListener('click', async () => {
     err.textContent = '';
-    const name = nameInput.value.trim();
-    if (!name) { err.textContent = 'Name is required.'; return; }
-    const item = itemInput.value.trim() || null;
-    const zones = zonesInput.value.trim() ? zonesInput.value.split(',').map((z) => z.trim()).filter(Boolean) : [];
+    const itemName = itemInput.value.trim() || null;
+    const zones = zoneListEditor.getValues();
+    const sampleNames = sampleListEditor.getValues();
+
+    if (sampleNames.length === 0 && !itemName) {
+      err.textContent = 'Enter an item name, or add at least one sample.';
+      return;
+    }
+
+    createBtn.disabled = true;
     try {
-      const sampleRef = await addDoc(collection(db, 'cases', c.id, 'samples'), { item, name, zones });
-      for (const action of defaultSampleActions(c.labWorkflowTemplate)) {
-        await addDoc(collection(db, 'cases', c.id, 'samples', sampleRef.id, 'actions'), action);
+      // No named samples: the whole item is one sample, not a group of
+      // one -- no separate `item` grouping label makes sense there.
+      const entries = sampleNames.length > 0
+        ? sampleNames.map((name) => ({ item: itemName, name }))
+        : [{ item: null, name: itemName }];
+
+      for (const entry of entries) {
+        await addDoc(collection(db, 'cases', c.id, 'samples'), { item: entry.item, name: entry.name, zones });
       }
-      await reopenToLabIfNeeded(c.id);
       await renderCaseDetail(c.id);
     } catch (ex) {
-      err.textContent = `Couldn't add sample: ${ex.message}`;
+      err.textContent = `Couldn't add sample(s): ${ex.message}`;
+      createBtn.disabled = false;
     }
   });
 
-  samples.forEach((s) => section.appendChild(buildSampleCard(c, s)));
+  samples.forEach((s) => section.appendChild(buildSampleStructureCard(c, s)));
   return section;
 }
 
-function buildSampleCard(c, s) {
+// Duplicate naming (2026-09-22, at the user's request): strips a trailing
+// " (N)" off the sample being duplicated to find its base name, looks at
+// every other sample with the same `item` whose name shares that base, and
+// names the copy one past the highest number in use -- e.g. duplicating
+// "Head (1)" when "Head (2)" already exists produces "Head (3)", not
+// "Head (2) (copy)". A sample with no numeric suffix counts as instance 1.
+// Queried fresh at click time (not off the possibly-stale render-time
+// `samples` list) so concurrent additions by someone else aren't missed.
+async function nextDuplicateName(caseId, item, name) {
+  const baseMatch = name.match(/^(.*) \((\d+)\)$/);
+  const baseName = baseMatch ? baseMatch[1] : name;
+  const siblingsSnap = await getDocs(query(collection(db, 'cases', caseId, 'samples'), where('item', '==', item)));
+  let maxNum = 1;
+  siblingsSnap.docs.forEach((d) => {
+    const siblingName = d.data().name || '';
+    const m = siblingName.match(/^(.*) \((\d+)\)$/);
+    const siblingBase = m ? m[1] : siblingName;
+    if (siblingBase !== baseName) return;
+    const n = m ? parseInt(m[2], 10) : 1;
+    if (n > maxNum) maxNum = n;
+  });
+  return `${baseName} (${maxNum + 1})`;
+}
+
+function buildSampleStructureCard(c, s) {
   const card = document.createElement('div');
   card.className = 'sample-card';
   const expanded = expandedSamples.has(s.id);
@@ -881,11 +1419,10 @@ function buildSampleCard(c, s) {
   header.className = 'sample-card-header';
   const title = document.createElement('strong');
   title.textContent = s.item ? `${s.item} - ${s.name}` : s.name;
-  const doneCount = s.actions.filter(isActionComplete).length;
-  const countSpan = document.createElement('span');
-  countSpan.className = 'muted';
-  countSpan.textContent = `${doneCount}/${s.actions.length} done ${expanded ? '▲' : '▼'}`;
-  header.append(title, countSpan);
+  const toggle = document.createElement('span');
+  toggle.className = 'muted';
+  toggle.textContent = expanded ? '▲' : '▼';
+  header.append(title, toggle);
   header.addEventListener('click', () => {
     if (expandedSamples.has(s.id)) expandedSamples.delete(s.id); else expandedSamples.add(s.id);
     renderCaseDetail(c.id);
@@ -894,194 +1431,158 @@ function buildSampleCard(c, s) {
 
   if (!expanded) return card;
 
-  if (s.zones && s.zones.length) {
-    const zonesP = document.createElement('p'); zonesP.className = 'muted';
-    zonesP.textContent = 'Zones: ' + s.zones.join(', ');
-    card.appendChild(zonesP);
-  }
+  const isEditing = editingSamples.has(s.id);
 
-  s.actions.forEach((a) => card.appendChild(buildActionRow(c, s, a)));
+  if (isEditing) {
+    // Full inline edit form -- item, name, and a re-populated zones list
+    // editor (rename/remove any zone, add new ones), replacing the old
+    // read-only display + one-off "+ Zone" quick-add (2026-09-23, at the
+    // user's request: "allow sample edit -- name, zone names, deleting
+    // zones"). Save writes all three fields in one updateDoc; Cancel just
+    // exits edit mode with no write.
+    const editForm = document.createElement('div');
+    editForm.className = 'sample-edit-form';
 
-  const addForm = document.createElement('form');
-  addForm.className = 'add-row';
-  const nameInput = document.createElement('input'); nameInput.placeholder = 'Action name'; nameInput.required = true;
-  const nameField = document.createElement('div'); nameField.className = 'field'; nameField.appendChild(nameInput);
-  addForm.appendChild(nameField);
+    const itemField = document.createElement('div'); itemField.className = 'field';
+    const itemLabel = document.createElement('label'); itemLabel.textContent = 'Item';
+    const itemInput = document.createElement('input'); itemInput.value = s.item || '';
+    itemField.append(itemLabel, itemInput);
+    editForm.appendChild(itemField);
 
-  const typeSelect = document.createElement('select');
-  ['simple', 'verified'].forEach((t) => {
-    const opt = document.createElement('option'); opt.value = t; opt.textContent = t;
-    typeSelect.appendChild(opt);
-  });
-  const typeField = document.createElement('div'); typeField.className = 'field'; typeField.appendChild(typeSelect);
-  addForm.appendChild(typeField);
+    const nameField = document.createElement('div'); nameField.className = 'field';
+    const nameLabel = document.createElement('label'); nameLabel.textContent = 'Name';
+    const nameInput = document.createElement('input'); nameInput.value = s.name || '';
+    nameField.append(nameLabel, nameInput);
+    editForm.appendChild(nameField);
 
-  let zoneSelect = null;
-  if (s.zones && s.zones.length) {
-    zoneSelect = document.createElement('select');
-    const noneOpt = document.createElement('option'); noneOpt.value = ''; noneOpt.textContent = '(whole sample)';
-    zoneSelect.appendChild(noneOpt);
-    s.zones.forEach((z) => {
-      const opt = document.createElement('option'); opt.value = z; opt.textContent = z;
-      zoneSelect.appendChild(opt);
+    const zonesLabel = document.createElement('label'); zonesLabel.textContent = 'Zones';
+    editForm.appendChild(zonesLabel);
+    const zoneListEditor = buildNameListEditor('+ Zone', 'Zone name', s.zones || []);
+    editForm.appendChild(zoneListEditor);
+
+    const err = document.createElement('div'); err.className = 'error';
+    const saveBtn = document.createElement('button');
+    saveBtn.type = 'button'; saveBtn.className = 'btn btn-small btn-primary'; saveBtn.textContent = 'Save';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button'; cancelBtn.className = 'btn btn-small'; cancelBtn.textContent = 'Cancel'; cancelBtn.style.marginLeft = '8px';
+    saveBtn.style.marginTop = '10px';
+    editForm.append(saveBtn, cancelBtn, err);
+    card.appendChild(editForm);
+
+    cancelBtn.addEventListener('click', () => {
+      editingSamples.delete(s.id);
+      renderCaseDetail(c.id);
     });
-    const zoneField = document.createElement('div'); zoneField.className = 'field'; zoneField.appendChild(zoneSelect);
-    addForm.appendChild(zoneField);
-  }
-
-  const addActionBtn = document.createElement('button');
-  addActionBtn.type = 'submit'; addActionBtn.className = 'btn btn-small'; addActionBtn.textContent = 'Add action';
-  addForm.appendChild(addActionBtn);
-  card.appendChild(addForm);
-
-  addForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const name = nameInput.value.trim();
-    if (!name) return;
-    const zone = zoneSelect && zoneSelect.value ? zoneSelect.value : null;
-    await addDoc(collection(db, 'cases', c.id, 'samples', s.id, 'actions'), {
-      name, zone, type: typeSelect.value, notes: '',
-      environment: [], calibration: [], measurements: [],
-      status: false, executedBy: null, executionTimestamp: null,
-      verifiedBy: null, verificationTimestamp: null, verifiedMeasurements: []
+    saveBtn.addEventListener('click', async () => {
+      const newName = nameInput.value.trim();
+      if (!newName) { err.textContent = 'Name is required.'; return; }
+      saveBtn.disabled = true;
+      await updateDoc(doc(db, 'cases', c.id, 'samples', s.id), {
+        item: itemInput.value.trim() || null,
+        name: newName,
+        zones: zoneListEditor.getValues()
+      });
+      editingSamples.delete(s.id);
+      await renderCaseDetail(c.id);
     });
-    await reopenToLabIfNeeded(c.id);
-    await renderCaseDetail(c.id);
-  });
 
-  return card;
-}
-
-// ---------------------------------------------------------------------
-// value list editor: {name, actualValue, units} rows, used for
-// environment / calibration / measurements / verifiedMeasurements.
-// ---------------------------------------------------------------------
-function buildValueListEditor(label, initialValues) {
-  const wrap = document.createElement('div');
-  wrap.className = 'value-list';
-  const l = document.createElement('label'); l.textContent = label;
-  wrap.appendChild(l);
-  const rows = document.createElement('div');
-  wrap.appendChild(rows);
-
-  function addRow(v) {
-    const row = document.createElement('div'); row.className = 'value-row';
-    const nameI = document.createElement('input'); nameI.placeholder = 'name'; nameI.value = v?.name || '';
-    const actualI = document.createElement('input'); actualI.placeholder = 'value'; actualI.value = v?.actualValue || '';
-    const unitsI = document.createElement('input'); unitsI.placeholder = 'units'; unitsI.value = v?.units || '';
-    const rmBtn = document.createElement('button'); rmBtn.type = 'button'; rmBtn.className = 'btn btn-small'; rmBtn.textContent = '✕';
-    rmBtn.addEventListener('click', () => row.remove());
-    row.append(nameI, actualI, unitsI, rmBtn);
-    rows.appendChild(row);
+    return card;
   }
-  (initialValues || []).forEach(addRow);
 
-  const addBtn = document.createElement('button');
-  addBtn.type = 'button'; addBtn.className = 'btn btn-small'; addBtn.textContent = `+ Add ${label.toLowerCase()} row`;
-  addBtn.addEventListener('click', () => addRow(null));
-  wrap.appendChild(addBtn);
+  // Read-only zones display -- switches to the edit form above via the
+  // Edit icon below.
+  const zonesRow = document.createElement('div');
+  zonesRow.style.display = 'flex'; zonesRow.style.alignItems = 'center'; zonesRow.style.gap = '8px'; zonesRow.style.flexWrap = 'wrap';
+  const zonesText = document.createElement('span'); zonesText.className = 'muted';
+  zonesText.textContent = s.zones && s.zones.length ? 'Zones: ' + s.zones.join(', ') : 'No zones yet';
+  zonesRow.append(zonesText);
+  card.appendChild(zonesRow);
 
-  wrap.getValues = () => Array.from(rows.children).map((row) => {
-    const [nameI, actualI, unitsI] = row.querySelectorAll('input');
-    return { name: nameI.value.trim(), actualValue: actualI.value.trim(), units: unitsI.value.trim() };
-  }).filter((v) => v.name || v.actualValue || v.units);
+  // Edit + Duplicate + Delete -- common per-sample actions, shown as small
+  // icon buttons rather than text (at the user's request, 2026-09-22: "for
+  // common actions use icons"), matching the icon-btn pattern already used
+  // for the case-detail header and overview row (TRASH_ICON_SVG etc.).
+  // Edit and Duplicate are open to any case staff (same write permission
+  // as adding a sample). Duplicate copies item/name/zones and seeds fresh
+  // default actions, exactly like creating a new sample, just pre-filled.
+  // Delete stays team_leader-only, matching setup/firestore.rules' samples
+  // delete rule (unchanged from Iteration 4); it cascade-deletes the
+  // sample's own actions first, same reasoning as case deletion: Firestore
+  // doesn't cascade subcollections on its own.
+  const actionsRow = document.createElement('div');
+  actionsRow.className = 'sample-actions-row';
 
-  return wrap;
-}
+  const editBtn = document.createElement('button');
+  editBtn.type = 'button'; editBtn.className = 'icon-btn icon-btn-small icon-btn-accent';
+  editBtn.title = 'Edit sample'; editBtn.setAttribute('aria-label', 'Edit sample');
+  editBtn.innerHTML = EDIT_ICON_SVG;
+  editBtn.addEventListener('click', () => {
+    editingSamples.add(s.id);
+    renderCaseDetail(c.id);
+  });
+  actionsRow.appendChild(editBtn);
 
-function buildActionRow(c, s, a) {
-  const row = document.createElement('div');
-  row.className = 'action-row';
+  const duplicateBtn = document.createElement('button');
+  duplicateBtn.type = 'button'; duplicateBtn.className = 'icon-btn icon-btn-small icon-btn-accent';
+  duplicateBtn.title = 'Duplicate sample'; duplicateBtn.setAttribute('aria-label', 'Duplicate sample');
+  duplicateBtn.innerHTML = DUPLICATE_ICON_SVG;
+  duplicateBtn.addEventListener('click', async () => {
+    duplicateBtn.disabled = true;
+    try {
+      // If the original has no running number yet, give it "(1)" as part
+      // of this same operation, so the two samples read as a clear pair
+      // ("Screw (1)"/"Screw (2)") instead of one bare and one numbered
+      // (2026-09-23, at the user's request). Only the original's own name
+      // needs updating -- nextDuplicateName's sibling scan already treats
+      // an unnumbered name as instance 1 when computing the copy's number.
+      if (!/^(.*) \((\d+)\)$/.test(s.name)) {
+        await updateDoc(doc(db, 'cases', c.id, 'samples', s.id), { name: `${s.name} (1)` });
+      }
+      const newName = await nextDuplicateName(c.id, s.item, s.name);
+      await addDoc(collection(db, 'cases', c.id, 'samples'), { item: s.item, name: newName, zones: s.zones || [] });
+      await renderCaseDetail(c.id);
+    } catch (ex) {
+      duplicateBtn.disabled = false;
+    }
+  });
+  actionsRow.appendChild(duplicateBtn);
 
-  const label = document.createElement('span');
-  label.textContent = `${a.name}${a.zone ? ` (${a.zone})` : ''} [${a.type}]` + (a.status ? ' — done' : '');
-  row.appendChild(label);
+  if (myProfile.role === 'team_leader') {
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button'; deleteBtn.className = 'icon-btn icon-btn-small icon-btn-danger';
+    deleteBtn.title = 'Delete sample'; deleteBtn.setAttribute('aria-label', 'Delete sample');
+    deleteBtn.innerHTML = TRASH_ICON_SVG;
+    actionsRow.appendChild(deleteBtn);
 
-  if (!a.status) {
-    const execBtn = document.createElement('button');
-    execBtn.type = 'button'; execBtn.className = 'btn btn-small'; execBtn.textContent = 'Execute';
-    row.appendChild(execBtn);
-    execBtn.addEventListener('click', () => {
-      if (row.querySelector('.execute-form')) return;
-      const form = document.createElement('div');
-      form.className = 'execute-form'; form.style.marginTop = '8px'; form.style.width = '100%';
-      const notesInput = document.createElement('input'); notesInput.placeholder = 'Notes';
-      const envEditor = buildValueListEditor('Environment', a.environment);
-      const calEditor = buildValueListEditor('Calibration', a.calibration);
-      const measEditor = buildValueListEditor('Measurements', a.measurements);
-      const saveBtn = document.createElement('button');
-      saveBtn.className = 'btn btn-small btn-primary'; saveBtn.textContent = 'Save'; saveBtn.style.marginTop = '6px';
-      form.append(notesInput, envEditor, calEditor, measEditor, saveBtn);
-      row.appendChild(form);
-      saveBtn.addEventListener('click', async () => {
-        saveBtn.disabled = true;
-        await updateDoc(doc(db, 'cases', c.id, 'samples', s.id, 'actions', a.id), {
-          notes: notesInput.value,
-          environment: envEditor.getValues(),
-          calibration: calEditor.getValues(),
-          measurements: measEditor.getValues(),
-          status: true,
-          executedBy: myProfile.username,
-          executionTimestamp: serverTimestamp()
-        });
+    deleteBtn.addEventListener('click', () => {
+      if (actionsRow.querySelector('.confirm-row')) return;
+      const confirmRow = document.createElement('div');
+      confirmRow.className = 'confirm-row';
+      confirmRow.style.cssText = 'position:absolute; left:0; top:34px; background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:10px; width:240px; z-index:5;';
+      const msg = document.createElement('p'); msg.className = 'error'; msg.style.margin = '0 0 8px';
+      msg.textContent = 'Delete this sample?';
+      const confirmBtn = document.createElement('button');
+      confirmBtn.type = 'button'; confirmBtn.className = 'btn btn-small btn-primary'; confirmBtn.textContent = 'Confirm';
+      const cancelBtn = document.createElement('button');
+      cancelBtn.type = 'button'; cancelBtn.className = 'btn btn-small'; cancelBtn.textContent = 'Cancel'; cancelBtn.style.marginLeft = '8px';
+      cancelBtn.addEventListener('click', () => confirmRow.remove());
+      confirmBtn.addEventListener('click', async () => {
+        confirmBtn.disabled = true;
+        // 0.5.0: no more per-sample actions subcollection to cascade --
+        // deleting the sample doc is the whole operation now (see
+        // workflow.js/deleteCaseCascade's comment).
+        await deleteDoc(doc(db, 'cases', c.id, 'samples', s.id));
+        expandedSamples.delete(s.id);
         await renderCaseDetail(c.id);
       });
+      confirmRow.append(msg, confirmBtn, cancelBtn);
+      actionsRow.appendChild(confirmRow);
     });
-    return row;
   }
 
-  const info = document.createElement('span'); info.className = 'muted';
-  info.textContent = `executed by ${a.executedBy}`;
-  row.appendChild(info);
+  card.appendChild(actionsRow);
 
-  if (a.type === 'verified') {
-    if (a.verifiedBy) {
-      const v = document.createElement('span'); v.className = 'muted';
-      v.textContent = `verified by ${a.verifiedBy}`;
-      row.appendChild(v);
-    } else if (a.executedBy !== myProfile.username) {
-      const verifyBtn = document.createElement('button');
-      verifyBtn.type = 'button'; verifyBtn.className = 'btn btn-small btn-primary'; verifyBtn.textContent = 'Verify';
-      row.appendChild(verifyBtn);
-      verifyBtn.addEventListener('click', () => {
-        if (row.querySelector('.execute-form')) return;
-        const form = document.createElement('div');
-        form.className = 'execute-form'; form.style.marginTop = '8px'; form.style.width = '100%';
-        const measEditor = buildValueListEditor('Verified measurements', a.verifiedMeasurements);
-        const saveBtn = document.createElement('button');
-        saveBtn.className = 'btn btn-small btn-primary'; saveBtn.textContent = 'Save verification'; saveBtn.style.marginTop = '6px';
-        form.append(measEditor, saveBtn);
-        row.appendChild(form);
-        saveBtn.addEventListener('click', async () => {
-          saveBtn.disabled = true;
-          await updateDoc(doc(db, 'cases', c.id, 'samples', s.id, 'actions', a.id), {
-            verifiedBy: myProfile.username,
-            verificationTimestamp: serverTimestamp(),
-            verifiedMeasurements: measEditor.getValues()
-          });
-          await renderCaseDetail(c.id);
-        });
-      });
-    } else {
-      const note = document.createElement('span'); note.className = 'muted';
-      note.textContent = '(awaiting verification by someone else)';
-      row.appendChild(note);
-    }
-  }
-
-  const reopenBtn = document.createElement('button');
-  reopenBtn.type = 'button'; reopenBtn.className = 'btn btn-small'; reopenBtn.textContent = 'Reopen';
-  reopenBtn.addEventListener('click', async () => {
-    await updateDoc(doc(db, 'cases', c.id, 'samples', s.id, 'actions', a.id), {
-      status: false, executedBy: null, executionTimestamp: null,
-      verifiedBy: null, verificationTimestamp: null, verifiedMeasurements: []
-    });
-    await reopenToLabIfNeeded(c.id);
-    await renderCaseDetail(c.id);
-  });
-  row.appendChild(reopenBtn);
-
-  return row;
+  return card;
 }
 
 // ---------------------------------------------------------------------

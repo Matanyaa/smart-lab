@@ -1,12 +1,12 @@
-import { auth, db, USERNAME_DOMAIN } from './firebase-init.js?v=0.4.2';
+import { auth, db, USERNAME_DOMAIN } from './firebase-init.js?v=1.0.0';
 import {
   signInWithEmailAndPassword, signOut, onAuthStateChanged,
   updatePassword, reauthenticateWithCredential, EmailAuthProvider
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
 import { doc, getDoc } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { loadUserList } from './admin-ui.js?v=0.4.2';
-import { showCasesScreen, hideCasesScreen } from './cases.js?v=0.4.2';
-import { showClientView, hideClientView } from './client-view.js?v=0.4.2';
+import { loadUserList } from './admin-ui.js?v=1.0.0';
+import { showCasesScreen, hideCasesScreen } from './cases.js?v=1.0.0';
+import { showClientView, hideClientView } from './client-view.js?v=1.0.0';
 
 const loginScreen = document.getElementById('loginScreen');
 const settingsScreen = document.getElementById('settingsScreen');
@@ -91,17 +91,21 @@ loginForm.addEventListener('submit', async (e) => {
 
 logoutBtn.addEventListener('click', () => signOut(auth));
 
-// Admin's username and role are effectively the same word ("admin | admin"
-// reads as redundant), so admin gets just the name; every other role
-// keeps "{username} | {role}".
+// Stacked name/role, mirroring the app-name/version stack in the header's
+// brand block. Admin's username and role are effectively the same word
+// ("admin" / "admin" reads as redundant), so admin gets just the name;
+// every other role gets the role as the smaller line underneath.
 function renderGreeting(profile) {
   greeting.textContent = '';
-  const nameEl = document.createElement('strong');
+  const nameEl = document.createElement('span');
+  nameEl.className = 'greeting-name';
   nameEl.textContent = profile.username;
-  if (profile.role === 'admin') {
-    greeting.append(nameEl);
-  } else {
-    greeting.append(nameEl, ` | ${profile.role}`);
+  greeting.appendChild(nameEl);
+  if (profile.role !== 'admin') {
+    const roleEl = document.createElement('span');
+    roleEl.className = 'version-sub';
+    roleEl.textContent = profile.role;
+    greeting.appendChild(roleEl);
   }
 }
 

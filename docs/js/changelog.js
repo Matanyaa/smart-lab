@@ -1,4 +1,4 @@
-import { APP_VERSION } from './firebase-init.js?v=0.4.2';
+import { APP_VERSION } from './firebase-init.js?v=1.0.0';
 
 // Plain-language, user-facing history -- distinct from SPEC.md's Decisions
 // Log (design/build rationale) and HANDOFF.md (Claude Code's build notes).
@@ -22,14 +22,49 @@ const CHANGELOG = [
     ]
   },
   {
-    version: '0.4.2',
+    version: '0.4.1',
     date: '2026-09-18',
     notes: [
       'Cases now have a Notes tab, and actions can require a second person to verify measurements.',
       'New: case types and client/client-org lookups, used when creating a case.',
       'Clients can now log in to see their own cases’ status.',
       'Case manager is optional when creating a case, and cases can be deleted at any stage.',
-      'Clearer "+ New case" button that shows when it’s open.'
+      'Clearer "+ New case" button that shows when it’s open.',
+      'Case view: Notes and Edit are now icon buttons at the top, and you can delete a case from there or right from the case list, without opening it first.',
+      'Case header now shows the case title, day/date/status, and client as three clear lines.',
+      'Visual refresh: new typography (a technical sans/mono pairing) and sharper corners app-wide, plus status now shows as a small stamped tag instead of plain text.',
+      'Case view: the workflow stage is now a row of named, clickable circles (New/Lab/Write/Archive/Done). Click any of them to preview that stage; the real controls still only appear on the case’s actual current stage.',
+      'Removed the redundant "Client" line from the compact case-info view (the header already shows it).',
+      'Samples no longer show test status/results inline -- that’s all in the Workflow section’s Lab view now, where you can also execute or verify actions.',
+      'Adding a sample no longer asks for a number of copies -- instead, each sample now has a Duplicate icon to quickly make a copy of it.',
+      'Samples: Delete and Duplicate are now small icon buttons instead of text.',
+      'Duplicating an unnumbered sample now numbers both the original and the copy (e.g. "Screw" becomes "Screw (1)" and "Screw (2)"), not just the copy.',
+      'New Edit icon on each sample: change its name, item, and zones (rename or remove a zone, not just add one) in place.'
+    ]
+  },
+  {
+    version: '0.6.0',
+    date: '2026-09-23',
+    notes: [
+      'Case workflow rebuilt: the fixed New/Lab/Write/Archive/Done stages are gone -- a case now follows whatever steps its case type\'s workflow was set up with, named however admin named them.',
+      'A workflow step is either a single done/not-done action, or a container holding its own nested steps.',
+      'A step can ask for parameters (choose from a list, or a free value) -- tag which sample(s)/zone(s) it applies to, then fill in values for each, with a "set for all, override individually" shortcut.',
+      'The moment a step is done, the workflow moves on to the next one automatically.',
+      'Long-press (or right-click) any step in the workflow to jump straight to it, skipping the normal order, with a confirmation first.',
+      'Admin can now build a case type\'s whole workflow from scratch -- add steps, nest steps inside a step, and set what each step asks for.',
+      'New admin tab: Workflow. Define reusable named actions once (with an upper level, e.g. "Make sample" under "Lab") and insert them straight into any case type\'s workflow instead of rebuilding them from scratch every time.',
+      'Case view: a case\'s own Workflow can now be edited in place (new Edit icon next to "Workflow") -- add or remove steps, rename one, or insert one from the catalog, without waiting on the case type\'s template.',
+      'New "+ Sub-action" button on any step -- turns it into a container holding its own nested steps (e.g. adding "Draft" inside "Writing"), right from the case view or the case type\'s template editor.',
+      'Steps can be reordered by dragging, or with ↑/↓, while editing.',
+      'Each step now just shows its own progress: done steps are filled solid, a partly-done container fills proportionally and shows a count (e.g. "2/5"). There\'s no separate "current step" highlight anymore -- tap any step to look at it.',
+      'The "Mark done" checkbox works on any step, not just the next one due -- so an already-passed step can be ticked or unticked freely, without needing to jump back to it first. Unticking a step only changes that step\'s own display -- it doesn\'t move or revert anything else.'
+    ]
+  },
+  {
+    version: '1.0.0',
+    date: '2026-09-24',
+    notes: [
+      'Smart Lab is now live for real, day-to-day case work.'
     ]
   }
 ];
