@@ -1,12 +1,12 @@
-import { auth, db, USERNAME_DOMAIN } from './firebase-init.js?v=0.6.0-t05';
+import { auth, db, USERNAME_DOMAIN } from './firebase-init.js?v=0.6.0-t06';
 import {
   signInWithEmailAndPassword, signOut, onAuthStateChanged,
   updatePassword, reauthenticateWithCredential, EmailAuthProvider
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
 import { doc, getDoc } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { loadUserList } from './admin-ui.js?v=0.6.0-t05';
-import { showCasesScreen, hideCasesScreen } from './cases.js?v=0.6.0-t05';
-import { showClientView, hideClientView } from './client-view.js?v=0.6.0-t05';
+import { loadUserList } from './admin-ui.js?v=0.6.0-t06';
+import { showCasesScreen, hideCasesScreen } from './cases.js?v=0.6.0-t06';
+import { showClientView, hideClientView } from './client-view.js?v=0.6.0-t06';
 
 const loginScreen = document.getElementById('loginScreen');
 const settingsScreen = document.getElementById('settingsScreen');
@@ -30,15 +30,24 @@ settingsBtn.addEventListener('click', () => {
 
 // Jump from docs/test/ to the launched app at docs/ -- a deliberate
 // non-primary gesture (right-click on desktop, long-press on phone) so
-// it's never triggered by an ordinary tap/click on the logo.
+// it's never triggered by an ordinary tap/click on the logo. Fixed
+// 2026-09-24: on a real phone this silently did nothing -- iOS/Android's
+// own long-press handling on the logo <img> (their "save/copy image"
+// callout) was winning the race against this timer and eating the touch
+// before it ever fired. `-webkit-touch-callout:none` etc. on the logo in
+// index.html's CSS stops the native gesture from appearing at all; calling
+// preventDefault() here too (non-passive) belt-and-suspenders that against
+// browsers that still try to start their own gesture recognition on the
+// image (Android's included).
 headerLogo.addEventListener('contextmenu', (e) => {
   e.preventDefault();
   location.href = '../';
 });
 let logoPressTimer = null;
-headerLogo.addEventListener('touchstart', () => {
+headerLogo.addEventListener('touchstart', (e) => {
+  e.preventDefault();
   logoPressTimer = setTimeout(() => { location.href = '../'; }, 600);
-});
+}, { passive: false });
 ['touchend', 'touchmove', 'touchcancel'].forEach((evt) => {
   headerLogo.addEventListener(evt, () => clearTimeout(logoPressTimer));
 });

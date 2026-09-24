@@ -1,9 +1,9 @@
-import { db } from './firebase-init.js?v=0.6.0-t05';
+import { db } from './firebase-init.js?v=0.6.0-t06';
 import {
   doc, updateDoc, deleteDoc, collection, getDocs, addDoc
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { newTerminalNode, newParameter, emptyWorkflow, updateAtPath, moveItem } from './workflow.js?v=0.6.0-t05';
-import { loadCatalog, actionDefsForContext, actionDefPath, nodeFromActionDef } from './catalog-ui.js?v=0.6.0-t05';
+import { newTerminalNode, newParameter, emptyWorkflow, updateAtPath, moveItem } from './workflow.js?v=0.6.0-t06';
+import { loadCatalog, actionDefsForContext, actionDefPath, nodeFromActionDef } from './catalog-ui.js?v=0.6.0-t06';
 
 // ---------------------------------------------------------------------
 // Admin: case type CRUD, plus the Workflow-template authoring screen. A

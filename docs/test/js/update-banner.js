@@ -1,4 +1,4 @@
-import { APP_VERSION } from './firebase-init.js?v=0.6.0-t05';
+import { APP_VERSION } from './firebase-init.js?v=0.6.0-t06';
 
 document.getElementById('versionBadge').textContent = `v${APP_VERSION}`;
 
