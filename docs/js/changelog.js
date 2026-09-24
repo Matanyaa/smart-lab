@@ -1,4 +1,4 @@
-import { APP_VERSION } from './firebase-init.js?v=1.0.0';
+import { APP_VERSION } from './firebase-init.js?v=1.0.1';
 
 // Plain-language, user-facing history -- distinct from SPEC.md's Decisions
 // Log (design/build rationale) and HANDOFF.md (Claude Code's build notes).
@@ -65,6 +65,13 @@ const CHANGELOG = [
     date: '2026-09-24',
     notes: [
       'Smart Lab is now live for real, day-to-day case work.'
+    ]
+  },
+  {
+    version: '1.0.1',
+    date: '2026-09-24',
+    notes: [
+      'Fixed the accent color, which briefly turned orange -- back to the familiar green.'
     ]
   }
 ];

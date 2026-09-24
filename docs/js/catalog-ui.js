@@ -1,8 +1,8 @@
-import { db } from './firebase-init.js?v=1.0.0';
+import { db } from './firebase-init.js?v=1.0.1';
 import {
   collection, doc, getDocs, addDoc, deleteDoc
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { newTerminalNode, newContainerNode } from './workflow.js?v=1.0.0';
+import { newTerminalNode, newContainerNode } from './workflow.js?v=1.0.1';
 
 // ---------------------------------------------------------------------
 // Admin: reusable Action catalog (0.6.0 -- retired the separate `taskDefs`
